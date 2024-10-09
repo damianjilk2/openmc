@@ -45,6 +45,7 @@
 #endif
 
 #ifdef DAGMC
+#include "mesh.h"
 #include "moab/FileOptions.hpp"
 #endif
 
@@ -234,6 +235,62 @@ vector<Mesh::MaterialVolume> Mesh::material_volumes(
   }
 
   return result;
+}
+
+void Mesh::sum_distance_xs(int nx, int ny, int nz) const
+{
+  auto bbox = this->bounding_box();
+  std::array<int, 3> n_rays = {nx, ny, nz};
+  Position width((bbox.xmax - bbox.xmin) / nx, (bbox.ymax - bbox.ymin) / ny,
+    (bbox.zmax - bbox.zmin) / nz);
+
+  Particle p;
+  SourceSite site;
+  site.E = 1.0;
+  site.particle = ParticleType::neutron;
+
+  // TODO: investigate starting position and direction
+  site.r = {0.0, 0.0, 0.0};
+  site.u = {0.0, 0.0, 0.0};
+  p.from_source(&site);
+
+  double total_distance_xs = 0.0;
+
+  while (true) {
+    // Ray trace from r_start to r_end
+    // Assume position has been set up correctly
+
+    Position r0 = p.r();
+
+    // Find distance to the next boundary and move
+    BoundaryInfo boundary = distance_to_boundary(p);
+    double distance = boundary.distance;
+    p.move_distance(distance);
+
+    double xs = 0.0;
+    if (p.material() != C_NONE) {
+      const Material& material = *model::materials[p.material()];
+      // Update internal state in Particle p
+      material.calculate_xs(p);
+      xs = p.macro_xs().total;
+    } else {
+      // Use default macro cross-section if no material
+      xs = p.macro_xs().total;
+    }
+
+    total_distance_xs += distance * xs;
+
+    if (boundary.surface_index == -1) {
+      // Particle has left the mesh, stop tracking
+      break;
+    }
+
+    // TODO: handle surface and lattice crossings
+  }
+
+  // Output the result
+  std::cout << "Total distance * cross-section: " << total_distance_xs
+            << std::endl;
 }
 
 //==============================================================================
