@@ -186,6 +186,8 @@ public:
   vector<MaterialVolume> material_volumes(
     int n_sample, int bin, uint64_t* seed) const;
 
+  void Mesh::sum_distance_xs(int nx, int ny, int nz) const;
+
   //! Determine bounding box of mesh
   //
   //! \return Bounding box of mesh

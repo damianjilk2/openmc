@@ -45,7 +45,6 @@
 #endif
 
 #ifdef DAGMC
-#include "mesh.h"
 #include "moab/FileOptions.hpp"
 #endif
 
