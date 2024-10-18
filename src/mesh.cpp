@@ -236,29 +236,29 @@ vector<Mesh::MaterialVolume> Mesh::material_volumes(
   return result;
 }
 
-void Mesh::sum_distance_xs(int nx, int ny, int nz) const
+void Mesh::sum_distance_xs(const Position& start, const Position& end) const
 {
-  auto bbox = this->bounding_box();
-  std::array<int, 3> n_rays = {nx, ny, nz};
-  Position width((bbox.xmax - bbox.xmin) / nx, (bbox.ymax - bbox.ymin) / ny,
-    (bbox.zmax - bbox.zmin) / nz);
+  Position direction = {end.x - start.x, end.y - start.y, end.z - start.z};
+  double magnitude =
+    std::sqrt(direction.x * direction.x + direction.y * direction.y +
+              direction.z * direction.z);
+
+  // Normalize the direction
+  direction.x /= magnitude;
+  direction.y /= magnitude;
+  direction.z /= magnitude;
 
   Particle p;
   SourceSite site;
   site.E = 1.0;
   site.particle = ParticleType::neutron;
-
-  // TODO: investigate starting position and direction
-  site.r = {0.0, 0.0, 0.0};
-  site.u = {0.0, 0.0, 0.0};
+  site.r = start;
+  site.u = direction;
   p.from_source(&site);
 
   double total_distance_xs = 0.0;
 
   while (true) {
-    // Ray trace from r_start to r_end
-    // Assume position has been set up correctly
-
     Position r0 = p.r();
 
     // Find distance to the next boundary and move
@@ -277,11 +277,12 @@ void Mesh::sum_distance_xs(int nx, int ny, int nz) const
       xs = p.macro_xs().total;
     }
 
+    // Accumulate the distance * cross-section
     total_distance_xs += distance * xs;
 
+    // Check if particle has left the mesh
     if (boundary.surface_index == -1) {
-      // Particle has left the mesh, stop tracking
-      break;
+      break; // Exit the loop once outside the mesh
     }
 
     // TODO: handle surface and lattice crossings
