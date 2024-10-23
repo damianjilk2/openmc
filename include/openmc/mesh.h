@@ -186,6 +186,8 @@ public:
   vector<MaterialVolume> material_volumes(
     int n_sample, int bin, uint64_t* seed) const;
 
+  void optical_thickness(const Position& start, const Position& end) const;
+
   //! Determine bounding box of mesh
   //
   //! \return Bounding box of mesh

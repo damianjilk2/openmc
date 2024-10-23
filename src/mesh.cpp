@@ -236,6 +236,52 @@ vector<Mesh::MaterialVolume> Mesh::material_volumes(
   return result;
 }
 
+void Mesh::optical_thickness(const Position& start, const Position& end) const
+{
+  Position direction = end - start;
+  direction /= direction.norm();
+
+  Particle p;
+  SourceSite site;
+  site.E = 1.0;
+  site.particle = ParticleType::neutron;
+  site.r = start;
+  site.u = direction;
+  p.from_source(&site);
+
+  double optical_thickness = 0.0;
+
+  while (true) {
+    // Find distance to the next boundary and move
+    BoundaryInfo boundary = distance_to_boundary(p);
+    double distance = boundary.distance;
+
+    double xs = 0.0;
+    if (p.material() != C_NONE) {
+      const Material& material = *model::materials[p.material()];
+      // Update internal state in Particle p
+      material.calculate_xs(p);
+    }
+    xs = p.macro_xs().total;
+
+    // Accumulate the distance * cross-section
+    optical_thickness += distance * xs;
+
+    // Check if particle has left the mesh
+    if (boundary.surface_index == -1) {
+      // TODO: update to account for round-off error
+      break; // Exit the loop once outside the mesh
+    }
+
+    // TODO: handle surface and lattice crossings
+
+    p.move_distance(distance);
+  }
+
+  std::cout << "Total distance * cross-section: " << optical_thickness
+            << std::endl;
+}
+
 //==============================================================================
 // Structured Mesh implementation
 //==============================================================================
