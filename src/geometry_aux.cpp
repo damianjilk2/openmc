@@ -40,6 +40,11 @@ void update_universe_cell_count(int32_t a, int32_t b)
   }
 }
 
+extern "C" void make_matrix(double start, double end, double* output)
+{
+  *output = start + end;
+}
+
 void read_geometry_xml()
 {
   // Display output message

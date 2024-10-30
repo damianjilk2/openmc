@@ -107,6 +107,14 @@ _dll.openmc_global_bounding_box.errcheck = _error_handler
 _dll.openmc_sample_external_source.argtypes = [c_size_t, POINTER(c_uint64), POINTER(_SourceSite)]
 _dll.openmc_sample_external_source.restype = c_int
 _dll.openmc_sample_external_source.errcheck = _error_handler
+_dll.make_matrix.restrype = None
+_dll.make_matrix.argtypes = [c_double, c_double, POINTER(c_double)]
+
+def make_matrix(start, end):
+    """Note: currently computes addition of start and end in cpp."""
+    output = c_double()
+    _dll.make_matrix(c_double(start), c_double(end), output)
+    return output.value
 
 def global_bounding_box():
     """Calculate a global bounding box for the model"""

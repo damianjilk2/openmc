@@ -20,6 +20,8 @@ extern std::unordered_map<int32_t, std::unordered_map<int32_t, int32_t>>
 extern std::unordered_map<int32_t, int32_t> universe_level_counts;
 } // namespace model
 
+extern "C" void make_matrix(double start, double end, double* output);
+
 //! Read geometry from XML file
 void read_geometry_xml();
 
