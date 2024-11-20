@@ -17,6 +17,7 @@
 #include "openmc/lattice.h"
 #include "openmc/material.h"
 #include "openmc/settings.h"
+#include "openmc/simulation.h"
 #include "openmc/surface.h"
 #include "openmc/tallies/filter.h"
 #include "openmc/tallies/filter_cell_instance.h"
@@ -40,9 +41,42 @@ void update_universe_cell_count(int32_t a, int32_t b)
   }
 }
 
-extern "C" void make_matrix(double start, double end, double* output)
+extern "C" void openmc_get_optical_thickness(double start_x, double start_y,
+  double start_z, double end_x, double end_y, double end_z, double* output)
 {
-  *output = start + end;
+  Position start = Position(start_x, start_y, start_z);
+  Position end = Position(end_x, end_y, end_z);
+  Position direction = (end - start) / (end - start).norm();
+
+  initialize_data();
+
+  Particle p;
+  SourceSite site;
+  site.E = 1.0;
+  site.particle = ParticleType::neutron;
+  site.r = start;
+  site.u = direction;
+  p.from_source(&site);
+
+  double optical_thickness = 0.0;
+
+  while (true) {
+    if (!exhaustive_find_cell(p))
+      break;
+
+    BoundaryInfo boundary = distance_to_boundary(p);
+    double distance = boundary.distance;
+
+    p.event_calculate_xs();
+    optical_thickness += distance * p.macro_xs().total;
+
+    if (boundary.surface_index == -1)
+      break;
+
+    p.move_distance(distance);
+  }
+
+  *output = optical_thickness;
 }
 
 void read_geometry_xml()

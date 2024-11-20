@@ -107,13 +107,15 @@ _dll.openmc_global_bounding_box.errcheck = _error_handler
 _dll.openmc_sample_external_source.argtypes = [c_size_t, POINTER(c_uint64), POINTER(_SourceSite)]
 _dll.openmc_sample_external_source.restype = c_int
 _dll.openmc_sample_external_source.errcheck = _error_handler
-_dll.make_matrix.restrype = None
-_dll.make_matrix.argtypes = [c_double, c_double, POINTER(c_double)]
+_dll.openmc_get_optical_thickness.restrype = None
+_dll.openmc_get_optical_thickness.argtypes = [c_double, c_double, c_double, c_double, c_double, c_double, POINTER(c_double)]
 
-def make_matrix(start, end):
+def get_optical_thickness(start:tuple, end:tuple):
     """Note: currently computes addition of start and end in cpp."""
     output = c_double()
-    _dll.make_matrix(c_double(start), c_double(end), output)
+    start_x,start_y,start_z = start
+    end_x,end_y,end_z = end
+    _dll.openmc_get_optical_thickness(c_double(start_x), c_double(start_y), c_double(start_z), c_double(end_x), c_double(end_y), c_double(end_z), output)
     return output.value
 
 def global_bounding_box():
