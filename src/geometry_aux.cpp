@@ -11,6 +11,7 @@
 #include "openmc/constants.h"
 #include "openmc/container_util.h"
 #include "openmc/dagmc.h"
+#include "openmc/distribution_spatial.h"
 #include "openmc/error.h"
 #include "openmc/file_utils.h"
 #include "openmc/geometry.h"
@@ -41,42 +42,55 @@ void update_universe_cell_count(int32_t a, int32_t b)
   }
 }
 
-extern "C" void openmc_get_optical_thickness(double start_x, double start_y,
-  double start_z, double end_x, double end_y, double end_z, double* output)
+extern "C" void openmc_get_optical_thickness(Position start_voxel_min,
+  Position start_voxel_max, Position end_voxel_min, Position end_voxel_max,
+  int num_rays, double* output)
 {
-  Position start = Position(start_x, start_y, start_z);
-  Position end = Position(end_x, end_y, end_z);
-  Position direction = (end - start) / (end - start).norm();
+  double total_optical_thickness = 0.0;
+  SpatialBox start_box(start_voxel_min, start_voxel_max);
+  SpatialBox end_box(end_voxel_min, end_voxel_max);
+
+  int64_t id = 1;
+  uint64_t seed = init_seed(id, STREAM_SOURCE);
 
   initialize_data();
 
-  Particle p;
-  SourceSite site;
-  site.E = 1.0;
-  site.particle = ParticleType::neutron;
-  site.r = start;
-  site.u = direction;
-  p.from_source(&site);
+  for (int i = 0; i < num_rays; ++i) {
+    Position start_sampled_position = start_box.sample(&seed);
+    Position end_sampled_position = end_box.sample(&seed);
 
-  double optical_thickness = 0.0;
+    Position direction = (end_sampled_position - start_sampled_position) /
+                         (end_sampled_position - start_sampled_position).norm();
 
-  while (true) {
-    if (!exhaustive_find_cell(p))
-      break;
+    Particle p;
+    SourceSite site;
+    site.E = 1.0;
+    site.particle = ParticleType::neutron;
+    site.r = start_sampled_position;
+    site.u = direction;
+    p.from_source(&site);
 
-    BoundaryInfo boundary = distance_to_boundary(p);
-    double distance = boundary.distance;
+    double optical_thickness = 0.0;
 
-    p.event_calculate_xs();
-    optical_thickness += distance * p.macro_xs().total;
+    while (true) {
+      if (!exhaustive_find_cell(p))
+        break;
 
-    if (boundary.surface_index == -1)
-      break;
+      BoundaryInfo boundary = distance_to_boundary(p);
+      double distance = boundary.distance;
 
-    p.move_distance(distance);
+      p.event_calculate_xs();
+      optical_thickness += distance * p.macro_xs().total;
+
+      if (boundary.surface_index == -1)
+        break;
+
+      p.move_distance(distance);
+    }
+    total_optical_thickness += optical_thickness;
   }
 
-  *output = optical_thickness;
+  *output = total_optical_thickness / num_rays;
 }
 
 void read_geometry_xml()

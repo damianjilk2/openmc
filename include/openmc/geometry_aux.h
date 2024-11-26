@@ -20,8 +20,9 @@ extern std::unordered_map<int32_t, std::unordered_map<int32_t, int32_t>>
 extern std::unordered_map<int32_t, int32_t> universe_level_counts;
 } // namespace model
 
-extern "C" void openmc_get_optical_thickness(double start_x, double start_y,
-  double start_z, double end_x, double end_y, double end_z, double* output);
+extern "C" void openmc_get_optical_thickness(Position start_voxel_min,
+  Position start_voxel_max, Position end_voxel_min, Position end_voxel_max,
+  int num_rays, double* output);
 
 //! Read geometry from XML file
 void read_geometry_xml();
