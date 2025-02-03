@@ -109,7 +109,7 @@ _dll.openmc_global_bounding_box.errcheck = _error_handler
 _dll.openmc_sample_external_source.argtypes = [c_size_t, POINTER(c_uint64), POINTER(_SourceSite)]
 _dll.openmc_sample_external_source.restype = c_int
 _dll.openmc_sample_external_source.errcheck = _error_handler
-_dll.openmc_get_optical_thickness.restrype = None
+_dll.openmc_get_optical_thickness.restype = None
 _dll.openmc_get_optical_thickness.argtypes = [_Position, _Position, _Position, _Position, c_int, POINTER(c_double)]
 
 def get_optical_thickness(start_voxel_min:tuple, start_voxel_max:tuple, end_voxel_min:tuple, end_voxel_max:tuple, num_rays:int):
