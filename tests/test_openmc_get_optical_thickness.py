@@ -3,17 +3,30 @@ from openmc import RegularMesh
 import openmc.lib
 import numpy as np
 
-# Material
-material = openmc.Material(name="Hydrogen")
-material.add_element('H', 1.0)
-material.set_density('g/cm3', 0.071)
-materials = openmc.Materials([material])
+water = openmc.Material(name="h2o")
+water.add_nuclide('H1', 2.0)
+water.add_nuclide('O16', 1.0)
+water.set_density('g/cm3', 1.0)
+
+# Material 2: Uranium
+material_u = openmc.Material(name="Uranium")
+material_u.add_element('U', 1.0)
+material_u.set_density('g/cm3', 19.1)
+
+materials = openmc.Materials([water, material_u])
 materials.export_to_xml()
 
-# Geometry
-sphere = openmc.Sphere(r=10, boundary_type='vacuum')
-cell = openmc.Cell(fill=material, region=-sphere)
-geometry = openmc.Geometry([cell])
+# Geometry: define surfaces and cells
+sphere_inner = openmc.Sphere(r=2, boundary_type='transmission')
+sphere_outer = openmc.Sphere(r=10, boundary_type='vacuum')
+
+# Inner cell (filled with water)
+cell_inner = openmc.Cell(name="Inner Sphere", fill=water, region=-sphere_inner)
+
+# Outer shell (filled with Uranium)
+cell_outer = openmc.Cell(name="Outer Sphere", fill=material_u, region=+sphere_inner & -sphere_outer)
+
+geometry = openmc.Geometry([cell_inner, cell_outer])
 geometry.export_to_xml()
 
 # Settings
@@ -34,7 +47,6 @@ def calculate_optical_thickness_for_voxels(mesh: RegularMesh, num_rays: int):
 
     # Preallocate optical thickness matrix
     num_voxels = np.prod(dimensions)
-    print(num_voxels)
     tau = np.zeros((num_voxels, num_voxels))
 
     # Helper function to compute voxel bounds given its index
@@ -51,9 +63,7 @@ def calculate_optical_thickness_for_voxels(mesh: RegularMesh, num_rays: int):
         start_min, start_max = voxel_bounds(start_voxel)
         for end_voxel in range(num_voxels):
             end_min, end_max = voxel_bounds(end_voxel)
-            # TODO: investigate start_voxel and end_voxel logic. Does it makes sense to only solve upper triangle?
-            # TODO: also, what should happen when start_voxel = end_voxel?
-            # TODO: should the tau matrix be symmetric?
+            # TODO: what should happen when start_voxel = end_voxel?
 
             tau[start_voxel, end_voxel] = openmc.lib.get_optical_thickness(
                 start_min, start_max, end_min, end_max, num_rays
@@ -64,10 +74,18 @@ def calculate_optical_thickness_for_voxels(mesh: RegularMesh, num_rays: int):
     return tau
 
 mesh = RegularMesh()
-mesh.dimension = (1, 2, 2)  # mesh resolution
-mesh.lower_left = (0.0, 0.0, 0.0)
+mesh.dimension = (2, 2, 2)  # Mesh resolution
+mesh.lower_left = (0, 0, 0)
 mesh.upper_right = (5.0, 5.0, 5.0)
 
-num_rays = 10
+num_rays = 10000
 tau = calculate_optical_thickness_for_voxels(mesh, num_rays)
-print(tau)
+
+import csv
+filename = "tests/tau.csv"
+with open(filename, mode='w', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow([''] + [f"Voxel {i}" for i in range(len(tau))])
+        for i in range(len(tau)):
+             writer.writerow([f"Voxel {i}"] + tau[i].tolist())
+print(f"Matrix saved to {filename}")
