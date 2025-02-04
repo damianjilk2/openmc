@@ -109,10 +109,12 @@ _dll.openmc_global_bounding_box.errcheck = _error_handler
 _dll.openmc_sample_external_source.argtypes = [c_size_t, POINTER(c_uint64), POINTER(_SourceSite)]
 _dll.openmc_sample_external_source.restype = c_int
 _dll.openmc_sample_external_source.errcheck = _error_handler
-_dll.openmc_get_optical_thickness.restype = None
-_dll.openmc_get_optical_thickness.argtypes = [_Position, _Position, _Position, _Position, c_int, POINTER(c_double)]
+_dll.openmc_get_mean_optical_thickness_between_voxels.restype = None
+_dll.openmc_get_mean_optical_thickness_between_voxels.argtypes = [_Position, _Position, _Position, _Position, c_int, POINTER(c_double)]
+_dll.openmc_calculate_optical_thickness.restype = c_double
+_dll.openmc_calculate_optical_thickness.argtypes = [_Position, _Position]
 
-def get_optical_thickness(start_voxel_min:tuple, start_voxel_max:tuple, end_voxel_min:tuple, end_voxel_max:tuple, num_rays:int):
+def get_mean_optical_thickness_between_voxels(start_voxel_min:tuple, start_voxel_max:tuple, end_voxel_min:tuple, end_voxel_max:tuple, num_rays:int):
     start_min_x,start_min_y,start_min_z = start_voxel_min
     start_max_x,start_max_y,start_max_z = start_voxel_max
     end_min_x,end_min_y,end_min_z = end_voxel_min
@@ -127,8 +129,17 @@ def get_optical_thickness(start_voxel_min:tuple, start_voxel_max:tuple, end_voxe
 
     output = c_double()
     
-    _dll.openmc_get_optical_thickness(start_min_pos, start_max_pos, end_min_pos, end_max_pos, num_rays, output)
+    _dll.openmc_get_mean_optical_thickness_between_voxels(start_min_pos, start_max_pos, end_min_pos, end_max_pos, num_rays, output)
     return output.value
+
+def calculate_optical_thickness(start_pos:tuple, end_pos:tuple):
+    start_x,start_y,start_z = start_pos
+    end_x,end_y,end_z = end_pos
+
+    start_pos = _Position(c_double(start_x), c_double(start_y), c_double(start_z))
+    end_pos = _Position(c_double(end_x), c_double(end_y), c_double(end_z))
+
+    return _dll.openmc_calculate_optical_thickness(start_pos, end_pos)
 
 def global_bounding_box():
     """Calculate a global bounding box for the model"""

@@ -66,12 +66,9 @@ def calculate_optical_thickness_for_voxels(mesh: RegularMesh, num_rays: int):
             end_min, end_max = voxel_bounds(end_voxel)
             # TODO: what should happen when start_voxel = end_voxel?
 
-            tau[start_voxel, end_voxel] = openmc.lib.get_optical_thickness(
+            tau[start_voxel, end_voxel] = openmc.lib.get_mean_optical_thickness_between_voxels(
                 start_min, start_max, end_min, end_max, num_rays
             )
-
-    openmc.lib.finalize()
-
     return tau
 
 mesh = RegularMesh()
@@ -90,3 +87,5 @@ with open(filename, mode='w', newline='') as file:
         for i in range(len(tau)):
              writer.writerow([f"Voxel {i}"] + tau[i].tolist())
 print(f"Matrix saved to {filename}")
+
+openmc.lib.finalize()

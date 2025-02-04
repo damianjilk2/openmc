@@ -42,8 +42,8 @@ void update_universe_cell_count(int32_t a, int32_t b)
   }
 }
 
-double calculate_optical_thickness(Position start_sampled_position,
-  Position end_sampled_position, uint64_t* seed)
+extern "C" double openmc_calculate_optical_thickness(
+  Position start_sampled_position, Position end_sampled_position)
 {
   Position direction = (end_sampled_position - start_sampled_position) /
                        (end_sampled_position - start_sampled_position).norm();
@@ -62,30 +62,25 @@ double calculate_optical_thickness(Position start_sampled_position,
     if (!exhaustive_find_cell(p))
       break;
 
-    BoundaryInfo boundary = distance_to_boundary(p);
-    double distance_to_boundary = boundary.distance;
-    double distance_to_endpoint = (end_sampled_position - p.r()).norm();
-
-    // Check if we are in the cell containing the endpoint
-    if (distance_to_endpoint < distance_to_boundary) {
-      // Use the remaining distance to the endpoint
-      p.event_calculate_xs();
-      optical_thickness += distance_to_endpoint * p.macro_xs().total;
-      break; // Stop the loop
-    }
+    double cell_boundary_distance = distance_to_boundary(p).distance;
+    double endpoint_distance = (end_sampled_position - p.r()).norm();
 
     p.event_calculate_xs();
-    optical_thickness += distance_to_boundary * p.macro_xs().total;
-
-    p.move_distance(distance_to_boundary);
+    if (endpoint_distance < cell_boundary_distance) {
+      optical_thickness += endpoint_distance * p.macro_xs().total;
+      break; // reached endpoint
+    } else {
+      optical_thickness += cell_boundary_distance * p.macro_xs().total;
+      p.move_distance(cell_boundary_distance);
+    }
   }
 
   return optical_thickness;
 }
 
-extern "C" void openmc_get_optical_thickness(Position start_voxel_min,
-  Position start_voxel_max, Position end_voxel_min, Position end_voxel_max,
-  int num_rays, double* output)
+extern "C" void openmc_get_mean_optical_thickness_between_voxels(
+  Position start_voxel_min, Position start_voxel_max, Position end_voxel_min,
+  Position end_voxel_max, int num_rays, double* output)
 {
   double total_optical_thickness = 0.0;
   SpatialBox start_box(start_voxel_min, start_voxel_max);
@@ -98,8 +93,8 @@ extern "C" void openmc_get_optical_thickness(Position start_voxel_min,
     Position start_sampled_position = start_box.sample(&seed);
     Position end_sampled_position = end_box.sample(&seed);
 
-    total_optical_thickness += calculate_optical_thickness(
-      start_sampled_position, end_sampled_position, &seed);
+    total_optical_thickness += openmc_calculate_optical_thickness(
+      start_sampled_position, end_sampled_position);
   }
 
   *output = total_optical_thickness / num_rays;

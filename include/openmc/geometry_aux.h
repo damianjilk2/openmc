@@ -21,7 +21,8 @@ extern std::unordered_map<int32_t, int32_t> universe_level_counts;
 } // namespace model
 
 //==============================================================================
-//! Compute the average optical thickness between two spatial regions.
+//! Compute the average optical thickness between two spatial regions using
+//! random rays.
 //!
 //! \param[in] start_voxel_min Minimum corner of the starting voxel box
 //! \param[in] start_voxel_max Maximum corner of the starting voxel box
@@ -32,9 +33,20 @@ extern std::unordered_map<int32_t, int32_t> universe_level_counts;
 //!   optical thickness
 //==============================================================================
 
-extern "C" void openmc_get_optical_thickness(Position start_voxel_min,
-  Position start_voxel_max, Position end_voxel_min, Position end_voxel_max,
-  int num_rays, double* output);
+extern "C" void openmc_get_mean_optical_thickness_between_voxels(
+  Position start_voxel_min, Position start_voxel_max, Position end_voxel_min,
+  Position end_voxel_max, int num_rays, double* output);
+
+//==============================================================================
+//! Compute the optical thickness between two positions.
+//!
+//! \param[in] start_pos Start position
+//! \param[in] end_pos End position
+//! \return The optical thickness between start position and end position
+//==============================================================================
+
+extern "C" double openmc_calculate_optical_thickness(
+  Position start_pos, Position end_pos);
 
 //! Read geometry from XML file
 void read_geometry_xml();
