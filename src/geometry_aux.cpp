@@ -94,8 +94,6 @@ extern "C" void openmc_get_optical_thickness(Position start_voxel_min,
   int64_t id = 1;
   uint64_t seed = init_seed(id, STREAM_SOURCE);
 
-  initialize_data();
-
   for (int i = 0; i < num_rays; ++i) {
     Position start_sampled_position = start_box.sample(&seed);
     Position end_sampled_position = end_box.sample(&seed);

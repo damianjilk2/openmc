@@ -37,6 +37,7 @@ settings.export_to_xml()
 
 def calculate_optical_thickness_for_voxels(mesh: RegularMesh, num_rays: int):
     openmc.lib.init()
+    openmc.lib.simulation_init()
 
     lower_left = np.array(mesh.lower_left)
     upper_right = np.array(mesh.upper_right)
