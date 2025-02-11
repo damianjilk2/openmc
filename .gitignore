@@ -106,4 +106,3 @@ CMakeSettings.json
 
 # Python pickle files
 *.pkl
-tests/tau.csv
