@@ -2,11 +2,11 @@ import openmc
 from openmc import RegularMesh
 import openmc.lib
 import numpy as np
-import csv
 import openmc.mgxs as mgxs
-# import pytest
+import pytest
 
-def define_fictitious_xs():
+@pytest.fixture
+def my_model():
     groups = mgxs.EnergyGroups(group_edges=[1e-5, 1.0e6])
 
     scatter_matrix = np.array([[[0]]])
@@ -27,7 +27,7 @@ def define_fictitious_xs():
     one_g_XS_file.add_xsdatas([mat1_xsdata, mat2_xsdata])
     one_g_XS_file.export_to_hdf5('xs.h5')
 
-def define_mat_and_geom():
+
     # Create a dummy material with fictitious cross-section data
     material1 = openmc.Material(name="Material1")
     material1.add_macroscopic('mat1')
@@ -51,17 +51,64 @@ def define_mat_and_geom():
     geometry = openmc.Geometry([cell_inner, cell_outer])
     geometry.export_to_xml()
 
-def define_settings():
+
     settings = openmc.Settings()
     settings.energy_mode = "multi-group"
     settings.particles = 1
     settings.batches = 1
     settings.export_to_xml()
 
-def calculate_optical_thickness_for_voxels(mesh: RegularMesh, num_rays: int):
+@pytest.fixture
+def lib_init(my_model):
     openmc.lib.init()
-    openmc.lib.simulation_init()
+    yield
+    openmc.lib.finalize()
 
+@pytest.fixture
+def lib_simulation_init(lib_init):
+    openmc.lib.simulation_init()
+    yield
+
+def test_optical_thickness_variations(lib_init):
+    """Test optical thickness calculation for various scenarios."""
+    mat1_xs = 0.01
+    mat2_xs = 0.02
+    mat1_r = 2
+    mat2_r = 10
+
+    # Origin to outer boundary in x-direction
+    expected_tau_x = mat1_xs * mat1_r + mat2_xs * (mat2_r - mat1_r)
+    calculated_tau_x = openmc.lib.calculate_optical_thickness((0, 0, 0), (10, 0, 0))
+    assert np.isclose(calculated_tau_x, expected_tau_x), \
+        f"Expected {expected_tau_x}, but got {calculated_tau_x}"
+
+    # Origin to boundary between regions in x-direction
+    expected_tau_boundary = mat1_xs * mat1_r
+    calculated_tau_boundary = openmc.lib.calculate_optical_thickness((0, 0, 0), (2, 0, 0))
+    assert np.isclose(calculated_tau_boundary, expected_tau_boundary), \
+        f"Expected {expected_tau_boundary}, but got {calculated_tau_boundary}"
+
+    # Origin to diagonal outer boundary
+    distance_diag = 10
+    expected_tau_diag = mat1_xs * mat1_r + mat2_xs * (distance_diag - mat1_r)
+    calculated_tau_diag = openmc.lib.calculate_optical_thickness((0, 0, 0), (5.8, 5.8, 5.8))
+    assert np.isclose(calculated_tau_diag, expected_tau_diag), \
+        f"Expected {expected_tau_diag}, but got {calculated_tau_diag}"
+
+def test_voxel_optical_thickness(lib_init):
+    """Test voxel-based optical thickness calculations."""
+    mesh = RegularMesh()
+    mesh.dimension = (2, 2, 2)
+    mesh.lower_left = (0, 0, 0)
+    mesh.upper_right = (10, 10, 10)
+
+    num_rays = 100
+    tau = calculate_optical_thickness_for_voxels(mesh, num_rays)
+
+    assert tau.shape == (8, 8), "Tau matrix should have shape (8, 8) for 2x2x2 mesh."
+    assert np.all(tau >= 0), "All optical thickness values should be non-negative."
+
+def calculate_optical_thickness_for_voxels(mesh: RegularMesh, num_rays: int):
     lower_left = np.array(mesh.lower_left)
     upper_right = np.array(mesh.upper_right)
     dimensions = np.array(mesh.dimension)
@@ -87,35 +134,7 @@ def calculate_optical_thickness_for_voxels(mesh: RegularMesh, num_rays: int):
         start_min, start_max = voxel_bounds(start_voxel)
         for end_voxel in range(num_voxels):
             end_min, end_max = voxel_bounds(end_voxel)
-            print(f"startmin: {start_min}, startmax: {start_max}, endmin: {end_min}, endmax: {end_max}")
-            # TODO: what should happen when start_voxel = end_voxel?
-
             tau[start_voxel, end_voxel] = openmc.lib.get_mean_optical_thickness_between_voxels(
                 start_min, start_max, end_min, end_max, num_rays
             )
     return tau
-
-if __name__ == "__main__":
-    define_fictitious_xs()
-    define_mat_and_geom()
-    define_settings()
-
-    mesh = RegularMesh()
-    mesh.dimension = (2, 2, 2)  # Mesh resolution
-    mesh.lower_left = (0, 0, 0)
-    mesh.upper_right = (2, 2, 2)
-
-    num_rays = 10000
-    tau = calculate_optical_thickness_for_voxels(mesh, num_rays)
-
-    filename = "tests/tau.csv"
-    with open(filename, mode='w', newline='') as file:
-        writer = csv.writer(file)
-        writer.writerow([''] + [f"Voxel {i}" for i in range(len(tau))])
-        for i in range(len(tau)):
-            writer.writerow([f"Voxel {i}"] + tau[i].tolist())
-    print(f"Matrix saved to {filename}")
-
-    print(openmc.lib.calculate_optical_thickness((0,0,0), (10,0,0)))
-
-    openmc.lib.finalize()
