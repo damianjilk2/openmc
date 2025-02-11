@@ -11,14 +11,12 @@
 #include "openmc/constants.h"
 #include "openmc/container_util.h"
 #include "openmc/dagmc.h"
-#include "openmc/distribution_spatial.h"
 #include "openmc/error.h"
 #include "openmc/file_utils.h"
 #include "openmc/geometry.h"
 #include "openmc/lattice.h"
 #include "openmc/material.h"
 #include "openmc/settings.h"
-#include "openmc/simulation.h"
 #include "openmc/surface.h"
 #include "openmc/tallies/filter.h"
 #include "openmc/tallies/filter_cell_instance.h"
@@ -40,64 +38,6 @@ void update_universe_cell_count(int32_t a, int32_t b)
   for (const auto& it : universe_b_counts) {
     universe_a_counts[it.first] += it.second;
   }
-}
-
-extern "C" double openmc_calculate_optical_thickness(
-  Position start_sampled_position, Position end_sampled_position)
-{
-  Position direction = (end_sampled_position - start_sampled_position) /
-                       (end_sampled_position - start_sampled_position).norm();
-
-  Particle p;
-  SourceSite site;
-  site.E = 1.0;
-  site.particle = ParticleType::neutron;
-  site.r = start_sampled_position;
-  site.u = direction;
-  p.from_source(&site);
-
-  double optical_thickness = 0.0;
-
-  while (true) {
-    if (!exhaustive_find_cell(p))
-      break;
-
-    double cell_boundary_distance = distance_to_boundary(p).distance;
-    double endpoint_distance = (end_sampled_position - p.r()).norm();
-
-    p.event_calculate_xs();
-    if (endpoint_distance < cell_boundary_distance) {
-      optical_thickness += endpoint_distance * p.macro_xs().total;
-      break; // reached endpoint
-    } else {
-      optical_thickness += cell_boundary_distance * p.macro_xs().total;
-      p.move_distance(cell_boundary_distance);
-    }
-  }
-
-  return optical_thickness;
-}
-
-extern "C" void openmc_get_mean_optical_thickness_between_voxels(
-  Position start_voxel_min, Position start_voxel_max, Position end_voxel_min,
-  Position end_voxel_max, int num_rays, double* output)
-{
-  double total_optical_thickness = 0.0;
-  SpatialBox start_box(start_voxel_min, start_voxel_max);
-  SpatialBox end_box(end_voxel_min, end_voxel_max);
-
-  int64_t id = 1;
-  uint64_t seed = init_seed(id, STREAM_SOURCE);
-
-  for (int i = 0; i < num_rays; ++i) {
-    Position start_sampled_position = start_box.sample(&seed);
-    Position end_sampled_position = end_box.sample(&seed);
-
-    total_optical_thickness += openmc_calculate_optical_thickness(
-      start_sampled_position, end_sampled_position);
-  }
-
-  *output = total_optical_thickness / num_rays;
 }
 
 void read_geometry_xml()
