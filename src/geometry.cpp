@@ -492,28 +492,28 @@ extern "C" int openmc_global_bounding_box(double* llc, double* urc)
 }
 
 extern "C" double openmc_calculate_optical_thickness(
-  Position start_sampled_position, Position end_sampled_position)
+  Position start_pos, Position end_pos)
 {
-  Position direction = (end_sampled_position - start_sampled_position) /
-                       (end_sampled_position - start_sampled_position).norm();
+  Position direction = (end_pos - start_pos) / (end_pos - start_pos).norm();
 
   Particle p;
   SourceSite site;
   site.E = 1.0;
   site.particle = ParticleType::neutron;
-  site.r = start_sampled_position;
+  site.r = start_pos;
   site.u = direction;
   p.from_source(&site);
 
   double optical_thickness = 0.0;
+  double endpoint_distance = 0.0;
+  double cell_boundary_distance = 0.0;
 
-  while (true) {
+  while (endpoint_distance >= cell_boundary_distance) {
     if (!exhaustive_find_cell(p))
       break;
 
-    double cell_boundary_distance = distance_to_boundary(p).distance;
-    double endpoint_distance = (end_sampled_position - p.r()).norm();
-
+    cell_boundary_distance = distance_to_boundary(p).distance;
+    endpoint_distance = (end_pos - p.r()).norm();
     p.event_calculate_xs();
     if (endpoint_distance < cell_boundary_distance) {
       optical_thickness += endpoint_distance * p.macro_xs().total;
