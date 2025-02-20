@@ -508,11 +508,26 @@ extern "C" double openmc_calculate_optical_thickness(
   double endpoint_distance = 0.0;
   double cell_boundary_distance = 0.0;
 
-  while (endpoint_distance >= cell_boundary_distance) {
-    if (!exhaustive_find_cell(p))
-      break;
+  if (!exhaustive_find_cell(p)) {
+    return 0.0; // start particle not in a cell
+  }
+  // Set birth cell attribute
+  if (p.cell_born() == C_NONE)
+    p.cell_born() = p.lowest_coord().cell;
 
-    cell_boundary_distance = distance_to_boundary(p).distance;
+  // Initialize last cells from current cell
+  for (int j = 0; j < p.n_coord(); ++j) {
+    p.cell_last(j) = p.coord(j).cell;
+  }
+  p.n_coord_last() = p.n_coord();
+
+  while (endpoint_distance >= cell_boundary_distance) {
+    BoundaryInfo boundary = distance_to_boundary(p);
+    cell_boundary_distance = boundary.distance;
+    if (cell_boundary_distance > 1e308) {
+      // it would be nice to find a cleaner way to call this case
+      break; // when mesh is larger than cells
+    }
     endpoint_distance = (end_pos - p.r()).norm();
     p.event_calculate_xs();
     if (endpoint_distance < cell_boundary_distance) {
@@ -521,6 +536,27 @@ extern "C" double openmc_calculate_optical_thickness(
     } else {
       optical_thickness += cell_boundary_distance * p.macro_xs().total;
       p.move_distance(cell_boundary_distance);
+
+      // cross next geometric surface
+      for (int j = 0; j < p.n_coord(); ++j) {
+        p.cell_last(j) = p.coord(j).cell;
+      }
+      p.n_coord_last() = p.n_coord();
+
+      // Set surface that particle is on and adjust coordinate levels
+      p.surface() = boundary.surface;
+      p.n_coord() = boundary.coord_level;
+
+      if (boundary.lattice_translation[0] != 0 ||
+          boundary.lattice_translation[1] != 0 ||
+          boundary.lattice_translation[2] != 0) {
+        // Particle crosses lattice boundary
+        cross_lattice(p, boundary);
+      } else {
+        // Particle crosses surface
+        const auto& surf {model::surfaces[p.surface_index()].get()};
+        p.cross_surface(*surf);
+      }
     }
   }
 

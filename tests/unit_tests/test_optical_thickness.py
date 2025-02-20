@@ -6,49 +6,71 @@ import openmc.mgxs as mgxs
 import pytest
 
 @pytest.fixture
-def my_model():
+def setup_vars():
+    mat1_xs = 0.01
+    mat2_xs = 0.02
+    outer_xs = 0.03
+    mat1_r = 2
+    mat2_r = 2
+    outer_r = 10
+    left_cell_offset = 3
+    right_cell_offset = 3
+    return mat1_xs, mat2_xs, outer_xs, mat1_r, mat2_r, outer_r, left_cell_offset, right_cell_offset
+
+
+@pytest.fixture
+def my_model(setup_vars):
+    mat1_xs, mat2_xs, outer_xs, mat1_r, mat2_r, outer_r, left_cell_offset, right_cell_offset = setup_vars
     groups = mgxs.EnergyGroups(group_edges=[1e-5, 1.0e6])
 
     scatter_matrix = np.array([[[0]]])
 
     mat1_xsdata = openmc.XSdata('mat1', groups)
     mat1_xsdata.order = 0
-    mat1_xsdata.set_total([0.01])
+    mat1_xsdata.set_total([mat1_xs])
     mat1_xsdata.set_absorption([0])
     mat1_xsdata.set_scatter_matrix(scatter_matrix)
 
     mat2_xsdata = openmc.XSdata('mat2', groups)
     mat2_xsdata.order = 0
-    mat2_xsdata.set_total([0.02])
+    mat2_xsdata.set_total([mat2_xs])
     mat2_xsdata.set_absorption([0])
     mat2_xsdata.set_scatter_matrix(scatter_matrix)
 
+    outer_xsdata = openmc.XSdata('mat3', groups)
+    outer_xsdata.order = 0
+    outer_xsdata.set_total([outer_xs])
+    outer_xsdata.set_absorption([0])
+    outer_xsdata.set_scatter_matrix(scatter_matrix)
+
     one_g_XS_file = openmc.MGXSLibrary(groups)
-    one_g_XS_file.add_xsdatas([mat1_xsdata, mat2_xsdata])
+    one_g_XS_file.add_xsdatas([mat1_xsdata, mat2_xsdata, outer_xsdata])
     one_g_XS_file.export_to_hdf5('xs.h5')
 
 
     # Create a dummy material with fictitious cross-section data
-    material1 = openmc.Material(name="Material1")
-    material1.add_macroscopic('mat1')
+    mat1 = openmc.Material(name="Material1")
+    mat1.add_macroscopic('mat1')
 
-    material2 = openmc.Material(name="Material2")
-    material2.add_macroscopic('mat2')
+    mat2 = openmc.Material(name="Material2")
+    mat2.add_macroscopic('mat2')
 
-    materials = openmc.Materials([material1, material2])
+    mat_outer = openmc.Material(name="Material3")
+    mat_outer.add_macroscopic('mat3')
+
+    materials = openmc.Materials([mat1, mat2, mat_outer])
     materials.cross_sections = 'xs.h5'
     materials.export_to_xml()
 
-    sphere_inner = openmc.Sphere(r=2, boundary_type='transmission')
-    sphere_outer = openmc.Sphere(r=10, boundary_type='vacuum')
+    sphere_inner_left = openmc.Sphere(x0=-left_cell_offset, r=mat1_r, boundary_type='transmission')
+    sphere_inner_right = openmc.Sphere(x0=right_cell_offset, r=mat2_r, boundary_type='transmission')
+    sphere_outer = openmc.Sphere(r=outer_r, boundary_type='vacuum')
 
-    # Inner cell (filled with Material1)
-    cell_inner = openmc.Cell(name="Inner Sphere", fill=material1, region=-sphere_inner)
+    cell_inner_left = openmc.Cell(name="Inner Sphere Left", fill=mat1, region=-sphere_inner_left)
+    cell_inner_right = openmc.Cell(name="Inner Sphere Right", fill=mat2, region=-sphere_inner_right)
+    cell_outer = openmc.Cell(name="Outer Sphere", fill=mat_outer, region=+sphere_inner_left & +sphere_inner_right & -sphere_outer)
 
-    # Outer shell (filled with Material2)
-    cell_outer = openmc.Cell(name="Outer Sphere", fill=material2, region=+sphere_inner & -sphere_outer)
-
-    geometry = openmc.Geometry([cell_inner, cell_outer])
+    geometry = openmc.Geometry([cell_inner_left, cell_inner_right, cell_outer])
     geometry.export_to_xml()
 
 
@@ -69,31 +91,34 @@ def lib_simulation_init(lib_init):
     openmc.lib.simulation_init()
     yield
 
-def test_optical_thickness_variations(lib_init):
+def test_optical_thickness_variations(lib_init, setup_vars):
     """Test optical thickness calculation for various scenarios."""
-    mat1_xs = 0.01
-    mat2_xs = 0.02
-    mat1_r = 2
-    mat2_r = 10
+    mat1_xs, mat2_xs, outer_xs, mat1_r, mat2_r, outer_r, left_cell_offset, right_cell_offset = setup_vars
 
-    # Origin to outer boundary in x-direction
-    expected_tau_x = mat1_xs * mat1_r + mat2_xs * (mat2_r - mat1_r)
-    calculated_tau_x = openmc.lib.calculate_optical_thickness((0, 0, 0), (10, 0, 0))
-    assert np.isclose(calculated_tau_x, expected_tau_x)
+    # Test Case 1: Origin to left center (through mat1 and outer region)
+    left_center_coord = -left_cell_offset
+    expected_tau_left = mat1_xs * mat1_r + outer_xs * (abs(left_center_coord) - mat1_r)
+    calculated_tau_left = openmc.lib.calculate_optical_thickness((0, 0, 0), (left_center_coord, 0, 0))
+    assert np.isclose(calculated_tau_left, expected_tau_left), f"Failed for left center path"
 
-    # Origin to boundary between regions in x-direction
-    expected_tau_boundary = mat1_xs * mat1_r
-    calculated_tau_boundary = openmc.lib.calculate_optical_thickness((0, 0, 0), (2, 0, 0))
-    assert np.isclose(calculated_tau_boundary, expected_tau_boundary)
+    # Test Case 2: Origin to outer boundary in x-direction
+    expected_tau_x = mat2_xs * (2 * mat2_r) + outer_xs * (outer_r - 2*mat2_r)
+    calculated_tau_x = openmc.lib.calculate_optical_thickness((0, 0, 0), (outer_r, 0, 0))
+    assert np.isclose(calculated_tau_x, expected_tau_x), f"Failed for outer boundary x path"
 
-    # Origin to diagonal outer boundary
-    distance_diag = 10
-    expected_tau_diag = mat1_xs * mat1_r + mat2_xs * (distance_diag - mat1_r)
-    calculated_tau_diag = openmc.lib.calculate_optical_thickness((0, 0, 0), (5.8, 5.8, 5.8))
-    assert np.isclose(calculated_tau_diag, expected_tau_diag)
+    # Test Case 3: Vertical path through outer region
+    expected_tau_outer = outer_xs * (2 * outer_r)
+    calculated_tau_outer = openmc.lib.calculate_optical_thickness((0, -outer_r, 0), (0, outer_r, 0))
+    assert np.isclose(calculated_tau_outer, expected_tau_outer), f"Failed for outer region vertical path"
+
+    # Test Case 4: Through both inner spheres and outer
+    expected_tau_full = mat1_xs * (2 * mat1_r) + mat2_xs * (2 * mat2_r) + outer_xs * (2*outer_r - 2 * mat1_r - 2 * mat2_r)
+    calculated_tau_full = openmc.lib.calculate_optical_thickness((-outer_r, 0, 0), (outer_r, 0, 0))
+    assert np.isclose(calculated_tau_full, expected_tau_full), f"Failed for full traversal path"
+
 
 def test_voxel_optical_thickness(lib_init):
-    """Test voxel-based optical thickness calculations."""
+    """Test voxel-based optical thickness calculation does not throw an error."""
     mesh = RegularMesh()
     mesh.dimension = (2, 2, 2)
     mesh.lower_left = (0, 0, 0)
