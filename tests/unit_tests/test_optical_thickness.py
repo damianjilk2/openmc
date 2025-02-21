@@ -7,20 +7,28 @@ import pytest
 
 @pytest.fixture
 def setup_vars():
-    mat1_xs = 0.01
-    mat2_xs = 0.02
-    outer_xs = 0.03
-    mat1_r = 2
-    mat2_r = 2
-    outer_r = 10
-    left_cell_offset = 3
-    right_cell_offset = 3
-    return mat1_xs, mat2_xs, outer_xs, mat1_r, mat2_r, outer_r, left_cell_offset, right_cell_offset
-
+    return {
+        "mat1_xs": 0.01,
+        "mat2_xs": 0.02,
+        "outer_xs": 0.03,
+        "mat1_r": 2,
+        "mat2_r": 2,
+        "outer_r": 10,
+        "left_cell_offset": 3,
+        "right_cell_offset": 3
+    }
 
 @pytest.fixture
 def my_model(setup_vars):
-    mat1_xs, mat2_xs, outer_xs, mat1_r, mat2_r, outer_r, left_cell_offset, right_cell_offset = setup_vars
+    mat1_xs = setup_vars["mat1_xs"]
+    mat2_xs = setup_vars["mat2_xs"]
+    outer_xs = setup_vars["outer_xs"]
+    mat1_r = setup_vars["mat1_r"]
+    mat2_r = setup_vars["mat2_r"]
+    outer_r = setup_vars["outer_r"]
+    left_cell_offset = setup_vars["left_cell_offset"]
+    right_cell_offset = setup_vars["right_cell_offset"]
+
     groups = mgxs.EnergyGroups(group_edges=[1e-5, 1.0e6])
 
     scatter_matrix = np.array([[[0]]])
@@ -93,7 +101,14 @@ def lib_simulation_init(lib_init):
 
 def test_optical_thickness_variations(lib_init, setup_vars):
     """Test optical thickness calculation for various scenarios."""
-    mat1_xs, mat2_xs, outer_xs, mat1_r, mat2_r, outer_r, left_cell_offset, right_cell_offset = setup_vars
+    mat1_xs = setup_vars["mat1_xs"]
+    mat2_xs = setup_vars["mat2_xs"]
+    outer_xs = setup_vars["outer_xs"]
+    mat1_r = setup_vars["mat1_r"]
+    mat2_r = setup_vars["mat2_r"]
+    outer_r = setup_vars["outer_r"]
+    left_cell_offset = setup_vars["left_cell_offset"]
+    right_cell_offset = setup_vars["right_cell_offset"]
 
     # Test Case 1: Origin to left center (through mat1 and outer region)
     left_center_coord = -left_cell_offset
@@ -122,7 +137,7 @@ def test_voxel_optical_thickness(lib_init):
     mesh = RegularMesh()
     mesh.dimension = (2, 2, 2)
     mesh.lower_left = (0, 0, 0)
-    mesh.upper_right = (10, 10, 10)
+    mesh.upper_right = (5, 5, 5)
 
     num_rays = 100
     tau = calculate_optical_thickness_for_voxels(mesh, num_rays)
