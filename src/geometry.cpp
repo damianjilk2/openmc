@@ -9,6 +9,7 @@
 #include "openmc/distribution_spatial.h"
 #include "openmc/error.h"
 #include "openmc/lattice.h"
+#include "openmc/openmp_interface.h"
 #include "openmc/settings.h"
 #include "openmc/simulation.h"
 #include "openmc/string_utils.h"
@@ -546,14 +547,17 @@ extern "C" void openmc_get_mean_optical_thickness_between_voxels(
   int64_t id = 1;
   uint64_t seed = init_seed(id, STREAM_SOURCE);
 
-  for (int i = 0; i < num_rays; ++i) {
-    Position start_sampled_position = start_box.sample(&seed);
-    Position end_sampled_position = end_box.sample(&seed);
+#pragma omp parallel
+  {
+    for (int i = 0; i < num_rays; ++i) {
+      Position start_sampled_position = start_box.sample(&seed);
+      Position end_sampled_position = end_box.sample(&seed);
 
-    total_optical_thickness += openmc_calculate_optical_thickness(
-      start_sampled_position, end_sampled_position);
+      total_optical_thickness += openmc_calculate_optical_thickness(
+        start_sampled_position, end_sampled_position);
+    }
+    *output = total_optical_thickness / num_rays;
   }
-  *output = total_optical_thickness / num_rays;
 }
 
 } // namespace openmc
