@@ -121,7 +121,7 @@ def build_1d_collision_probability_matrix(regions: List[Tuple[float, float]]) ->
     
     return P
 
-def calculate_3d_collision_probabilities(mesh, num_rays: int = 100) -> np.ndarray:
+def calculate_simplified_3d_collision_probabilities(mesh, num_rays: int = 100) -> np.ndarray:
     """
     Calculate collision probabilities for a 3D mesh using ray tracing.
     
@@ -145,19 +145,38 @@ def calculate_3d_collision_probabilities(mesh, num_rays: int = 100) -> np.ndarra
     
     # Initialize collision probability matrix
     P = np.zeros((n_voxels, n_voxels))
+
+    # calculate voxel centers once
+    centers = np.array([get_voxel_center(mesh, i) for i in range(n_voxels)])
     
-    # collision probabilities
+    # collision probabilities built from 1d
     for i in range(n_voxels):
         for j in range(n_voxels):
-            # For volume j to volume i
-            P[i, j] = (volumes[j] * cross_sections[i] / (4 * np.pi)) * \
-                      np.exp(-tau[i, j]) / (np.linalg.norm(get_voxel_center(mesh, i) - 
-                                                         get_voxel_center(mesh, j)) ** 2)
+            if i == j:
+                # self-collision (approximation based on mean chord length)
+                # Mean chord length for a convex body: L = 4V/S (V=volume, S=surface area)
+                # For a cube with side length a: L = 4a^3/(6a^3) = 2a/3
+                voxel_size = np.cbrt(volumes[i])  # cube root of volume
+                mean_chord = 2 * voxel_size / 3
+                
+                # Escape probability: exp(-sigma*L)
+                escape_prob = np.exp(-cross_sections[i] * mean_chord)
+                
+                # Self-collision probability is (1 - escape probability)
+                P[i, i] = 1.0 - escape_prob
+            else:
+                # collision between different voxels
+                dist = np.linalg.norm(centers[i] - centers[j])
+                
+                solid_angle_factor = volumes[j] / (4 * np.pi * dist**2)
+                
+                P[i, j] = cross_sections[i] * solid_angle_factor * np.exp(-tau[i, j])
     
     # normalize to satisfy the conservation principle
     for j in range(n_voxels):
         P[:, j] /= np.sum(P[:, j])
     
+    #TODO: from this very simplified solution, investigate the need for more rigor (2d integral presented in L+M with ray tracing)
     return P
 
 def calculate_optical_thickness_for_voxels(mesh, num_rays: int) -> np.ndarray:
@@ -204,6 +223,38 @@ def calculate_optical_thickness_for_voxels(mesh, num_rays: int) -> np.ndarray:
             )
     
     return tau
+
+def get_voxel_bounds(mesh, voxel_idx: int) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    Get the minimum and maximum bounds of a voxel.
+    
+    Parameters
+    ----------
+    mesh : openmc.RegularMesh
+        Mesh containing the voxels
+    voxel_idx : int
+        Index of the voxel
+        
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray]
+        (min_bound, max_bound) of the voxel
+    """
+    dimensions = np.array(mesh.dimension)
+    lower_left = np.array(mesh.lower_left)
+    upper_right = np.array(mesh.upper_right)
+    
+    voxel_size = (upper_right - lower_left) / dimensions
+    
+    # linear index to 3D indices
+    i = voxel_idx % dimensions[0]
+    j = (voxel_idx // dimensions[0]) % dimensions[1]
+    k = voxel_idx // (dimensions[0] * dimensions[1])
+    
+    min_bound = lower_left + np.array([i, j, k]) * voxel_size
+    max_bound = min_bound + voxel_size
+    
+    return min_bound, max_bound
 
 def get_voxel_properties(mesh):
     """
@@ -269,3 +320,54 @@ def get_voxel_center(mesh, voxel_index):
     center = lower_left + (np.array([i, j, k]) + 0.5) * voxel_size
     
     return center
+
+def get_voxel_surface_area(mesh, voxel_index):
+    """
+    Get the surface area of a voxel.
+    
+    Parameters
+    ----------
+    mesh : openmc.RegularMesh
+        Mesh dividing the geometry into voxels
+    voxel_index : int
+        Index of the voxel
+        
+    Returns
+    -------
+    float
+        Surface area of the voxel
+    """
+    dimensions = np.array(mesh.dimension)
+    lower_left = np.array(mesh.lower_left)
+    upper_right = np.array(mesh.upper_right)
+    
+    voxel_size = (upper_right - lower_left) / dimensions
+    
+    # For a rectangular voxel: 2*(dx*dy + dx*dz + dy*dz)
+    return 2 * (voxel_size[0]*voxel_size[1] + 
+               voxel_size[0]*voxel_size[2] + 
+               voxel_size[1]*voxel_size[2])
+
+def get_voxel_volume(mesh, voxel_index):
+    """
+    Get the volume of a voxel.
+    
+    Parameters
+    ----------
+    mesh : openmc.RegularMesh
+        Mesh dividing the geometry into voxels
+    voxel_index : int
+        Index of the voxel
+        
+    Returns
+    -------
+    float
+        Volume of the voxel
+    """
+    dimensions = np.array(mesh.dimension)
+    lower_left = np.array(mesh.lower_left)
+    upper_right = np.array(mesh.upper_right)
+    
+    voxel_size = (upper_right - lower_left) / dimensions
+    
+    return voxel_size[0] * voxel_size[1] * voxel_size[2]
