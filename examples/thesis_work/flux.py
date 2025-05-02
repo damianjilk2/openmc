@@ -29,67 +29,37 @@ def calculate_forward_flux(P: np.ndarray, sigma_total: np.ndarray, sigma_scatter
     V = np.diag(volumes)
     sigma_t = np.diag(sigma_total)
     sigma_s = np.diag(sigma_scatter)
-    S = np.diag(source)
+    S = source
 
     if method == 'direct':
         # direct matrix inversion phi = V^-1 (sigma_t - P sigma_s)^-1 P V S
         matrix = sigma_t - P @ sigma_s
-
         phi = np.linalg.inv(V) @ np.linalg.inv(matrix) @ P @ V @ S
-
-        # cond_forward = np.linalg.cond(matrix)
-        # cond_P = np.linalg.cond(P)
-        # print(f"Condition number of forward matrix: {cond_forward}")
-        # print(f"Condition number of P: {cond_P}")
-        # print(f'||P||2 (norm of P): {np.linalg.norm(P, 2)}')
-        # print(f'||P - P^T||2 (asymmetry of P): {np.linalg.norm(P - P.T, 2)}')
         
     elif method == 'iterative':
         # NOTE: iterative method has not been updated yet.
-
-        # iterative series solution phi = P Q + (P sigma V P Q) + (P sigma V P sigma V P Q) + ...
-        # phi = sum (I + P sigma V)^n P Q
-        phi = P @ Q
-        print(f"\n=== Iterative Forward Flux Solver ===")
-        print(f"Initial phi = P @ Q:")
-        print(phi)
-
-        norm_initial = np.linalg.norm(phi)
-        print(f"Initial norm: {norm_initial:.6e}")
-
-        # alpha = 1.0 / (np.linalg.norm(P @ sigma_V, 2) + 1e-6)
-
-        for i in range(max_iter):
-            # phi_{n+1} = P Q + P sigma V phi_n
-            phi_new = P @ Q + P @ sigma_V @ phi
-            # phi_new = (1 - alpha) * phi + alpha * (P @ Q + P @ sigma_V @ phi)
-
-            # check convergence
-            if np.linalg.norm(phi_new - phi) / np.linalg.norm(phi_new) < tol:
-                return phi_new
-            
-            phi = phi_new
-
-        print(f"Failed to converge in {max_iter} iterations")
+        pass
     else:
         raise ValueError(f"Unknown method: {method}")
     
     return phi
 
-def calculate_adjoint_flux(P: np.ndarray, sigma: np.ndarray, volumes: np.ndarray, Q_adj: np.ndarray, method: str = 'iterative',
-                       max_iter: int = 1000, tol: float = 1e-6) -> np.ndarray:
+def calculate_adjoint_flux(P: np.ndarray, sigma_total: np.ndarray, sigma_scatter: np.ndarray, volumes: np.ndarray, source_adj: np.ndarray, method: str = 'iterative',
+                       max_iter: int = 1000, tol: float = 1e-3) -> np.ndarray:
     """
-    Solve adjoint flux equation.
+    Solve adjoint flux equation using either iterative or direct method. 
     
     Parameters
     ----------
     P : np.ndarray
         Collision probability matrix [n x n]
-    sigma : np.ndarray
-        Cross sections vector [n]
+    sigma_total : np.ndarray
+        Total cross sections vector [n]
+    sigma_scatter : np.ndarray
+        Scattering cross sections vector [n]
     volumes : np.ndarray
         Volumes of each region [n]
-    Q_adj : np.ndarray
+    source_adj : np.ndarray
         Adjoint source vector [n]
     method : str
         'iterative' (default) or 'direct'
@@ -99,27 +69,18 @@ def calculate_adjoint_flux(P: np.ndarray, sigma: np.ndarray, volumes: np.ndarray
     phi_adj : np.ndarray
         Computed adjoint flux vector [n]
     """
-    sigma_V = np.diag(sigma * volumes)
+    V = np.diag(volumes)
+    sigma_t = np.diag(sigma_total)
+    sigma_s = np.diag(sigma_scatter)
+    S_adj = source_adj
 
     if method == 'direct':
-        # direct solution: phi_adj = inv(I - P^T sigma V) P^T Q_adj
-        I = np.eye(len(Q_adj))
-        matrix = I - P.T @ sigma_V
-        phi_adj = np.linalg.inv(matrix) @ P.T @ Q_adj
+        # direct matrix inversion phi_adj = V^-1 (sigma_t - P^T sigma_s)^-1 P^T V S_adj
+        matrix = sigma_t - P.T @ sigma_s
+        phi_adj = np.linalg.inv(V) @ np.linalg.inv(matrix) @ P.T @ V @ S_adj
         
     elif method == 'iterative':
-        phi_adj = P.T @ Q_adj
-        for _ in range(max_iter):
-            # phi*_{n+1} = P^T Q_adj + P^T sigma V phi*_n
-            phi_new = P.T @ Q_adj + P.T @ sigma_V @ phi_adj
-
-            # check convergence
-            if np.linalg.norm(phi_new - phi_adj) / np.linalg.norm(phi_new) < tol:
-                return phi_new
-            
-            phi_adj = phi_new
-        
-        print(f"Failed to converge in {max_iter} iterations")
+        pass
     else:
         raise ValueError(f"Unknown method: {method}")
     
