@@ -114,6 +114,198 @@ _dll.openmc_get_mean_optical_thickness_between_voxels.restype = None
 _dll.openmc_get_mean_optical_thickness_between_voxels.argtypes = [_Position, _Position, _Position, _Position, c_int, POINTER(c_double)]
 _dll.openmc_calculate_optical_thickness.restype = c_double
 _dll.openmc_calculate_optical_thickness.argtypes = [_Position, _Position]
+_dll.openmc_get_voxel_cross_sections.restype = None
+_dll.openmc_get_voxel_cross_sections.argtypes = [_Position, _Position, c_int, POINTER(c_double), POINTER(c_double)]
+_dll.openmc_get_transport_operator_between_voxels.restype = None
+_dll.openmc_get_transport_operator_between_voxels.argtypes = [_Position, _Position, _Position, _Position, c_int, POINTER(c_double)]
+_dll.openmc_get_self_transport_operator.restype = None
+_dll.openmc_get_self_transport_operator.argtypes = [_Position, _Position, c_int, POINTER(c_double)]
+_dll.openmc_calculate_g_ij.restype = None
+_dll.openmc_calculate_g_ij.argtypes = [_Position, _Position, _Position, _Position, c_int, POINTER(c_double)]
+_dll.openmc_calculate_g_ii.restype = None
+_dll.openmc_calculate_g_ii.argtypes = [_Position, _Position, c_int, POINTER(c_double)]
+
+def get_voxel_cross_sections(voxel_min:tuple, voxel_max:tuple, num_samples:int):
+    """Calculate average total and absorption cross sections within a voxel.
+    
+    Parameters
+    ----------
+    voxel_min : tuple
+        Minimum corner coordinates (x, y, z) of the voxel
+    voxel_max : tuple
+        Maximum corner coordinates (x, y, z) of the voxel
+    num_samples : int
+        Number of random samples to use for averaging
+        
+    Returns
+    -------
+    tuple
+        A tuple containing (sigma_t, sigma_a) - the average total and 
+        absorption cross sections
+    """
+    min_x, min_y, min_z = voxel_min
+    max_x, max_y, max_z = voxel_max
+    
+    min_pos = _Position(c_double(min_x), c_double(min_y), c_double(min_z))
+    max_pos = _Position(c_double(max_x), c_double(max_y), c_double(max_z))
+    
+    sigma_t = c_double()
+    sigma_a = c_double()
+    
+    _dll.openmc_get_voxel_cross_sections(
+        min_pos, max_pos, c_int(num_samples), 
+        sigma_t, sigma_a
+    )
+    
+    return sigma_t.value, sigma_a.value
+
+def get_transport_operator_between_voxels(start_voxel_min:tuple, start_voxel_max:tuple, 
+                                         end_voxel_min:tuple, end_voxel_max:tuple, 
+                                         num_rays:int):
+    """Calculate the average transport operator between two voxels.
+    
+    Parameters
+    ----------
+    start_voxel_min : tuple
+        Minimum corner coordinates (x, y, z) of the starting voxel
+    start_voxel_max : tuple
+        Maximum corner coordinates (x, y, z) of the starting voxel
+    end_voxel_min : tuple
+        Minimum corner coordinates (x, y, z) of the ending voxel
+    end_voxel_max : tuple
+        Maximum corner coordinates (x, y, z) of the ending voxel
+    num_rays : int
+        Number of random rays to use for averaging
+        
+    Returns
+    -------
+    float
+        Average transport operator value: exp(-tau)/|r_j-r_i|^2
+    """
+    start_min_x, start_min_y, start_min_z = start_voxel_min
+    start_max_x, start_max_y, start_max_z = start_voxel_max
+    end_min_x, end_min_y, end_min_z = end_voxel_min
+    end_max_x, end_max_y, end_max_z = end_voxel_max
+    
+    start_min_pos = _Position(c_double(start_min_x), c_double(start_min_y), c_double(start_min_z))
+    start_max_pos = _Position(c_double(start_max_x), c_double(start_max_y), c_double(start_max_z))
+    end_min_pos = _Position(c_double(end_min_x), c_double(end_min_y), c_double(end_min_z))
+    end_max_pos = _Position(c_double(end_max_x), c_double(end_max_y), c_double(end_max_z))
+    
+    transport_operator = c_double()
+    
+    _dll.openmc_get_transport_operator_between_voxels(
+        start_min_pos, start_max_pos, end_min_pos, end_max_pos,
+        c_int(num_rays), transport_operator
+    )
+    
+    return transport_operator.value
+
+def get_self_transport_operator(voxel_min:tuple, voxel_max:tuple, num_rays:int):
+    """Calculate the self-transport operator within a voxel.
+    
+    This uses a special method that projects rays to voxel boundaries.
+    
+    Parameters
+    ----------
+    voxel_min : tuple
+        Minimum corner coordinates (x, y, z) of the voxel
+    voxel_max : tuple
+        Maximum corner coordinates (x, y, z) of the voxel
+    num_rays : int
+        Number of random rays to use for averaging
+        
+    Returns
+    -------
+    float
+        Average self-transport operator value
+    """
+    min_x, min_y, min_z = voxel_min
+    max_x, max_y, max_z = voxel_max
+    
+    min_pos = _Position(c_double(min_x), c_double(min_y), c_double(min_z))
+    max_pos = _Position(c_double(max_x), c_double(max_y), c_double(max_z))
+    
+    transport_operator = c_double()
+    
+    _dll.openmc_get_self_transport_operator(
+        min_pos, max_pos, c_int(num_rays), transport_operator
+    )
+    
+    return transport_operator.value
+
+def calculate_g_ij(start_voxel_min:tuple, start_voxel_max:tuple, 
+                  end_voxel_min:tuple, end_voxel_max:tuple, 
+                  num_rays:int):
+    """Calculate the g_ij coupling coefficient between two voxels.
+    
+    Parameters
+    ----------
+    start_voxel_min : tuple
+        Minimum corner coordinates (x, y, z) of the starting voxel
+    start_voxel_max : tuple
+        Maximum corner coordinates (x, y, z) of the starting voxel
+    end_voxel_min : tuple
+        Minimum corner coordinates (x, y, z) of the ending voxel
+    end_voxel_max : tuple
+        Maximum corner coordinates (x, y, z) of the ending voxel
+    num_rays : int
+        Number of random rays to use for averaging
+        
+    Returns
+    -------
+    float
+        The g_ij coupling coefficient value
+    """
+    start_min_x, start_min_y, start_min_z = start_voxel_min
+    start_max_x, start_max_y, start_max_z = start_voxel_max
+    end_min_x, end_min_y, end_min_z = end_voxel_min
+    end_max_x, end_max_y, end_max_z = end_voxel_max
+    
+    start_min_pos = _Position(c_double(start_min_x), c_double(start_min_y), c_double(start_min_z))
+    start_max_pos = _Position(c_double(start_max_x), c_double(start_max_y), c_double(start_max_z))
+    end_min_pos = _Position(c_double(end_min_x), c_double(end_min_y), c_double(end_min_z))
+    end_max_pos = _Position(c_double(end_max_x), c_double(end_max_y), c_double(end_max_z))
+    
+    g_ij = c_double()
+    
+    _dll.openmc_calculate_g_ij(
+        start_min_pos, start_max_pos, end_min_pos, end_max_pos,
+        c_int(num_rays), g_ij
+    )
+    
+    return g_ij.value
+
+def calculate_g_ii(voxel_min:tuple, voxel_max:tuple, num_rays:int):
+    """Calculate the self-coupling coefficient g_ii for a voxel.
+    
+    Parameters
+    ----------
+    voxel_min : tuple
+        Minimum corner coordinates (x, y, z) of the voxel
+    voxel_max : tuple
+        Maximum corner coordinates (x, y, z) of the voxel
+    num_rays : int
+        Number of random rays to use for averaging
+        
+    Returns
+    -------
+    float
+        The g_ii self-coupling coefficient value
+    """
+    min_x, min_y, min_z = voxel_min
+    max_x, max_y, max_z = voxel_max
+    
+    min_pos = _Position(c_double(min_x), c_double(min_y), c_double(min_z))
+    max_pos = _Position(c_double(max_x), c_double(max_y), c_double(max_z))
+    
+    g_ii = c_double()
+    
+    _dll.openmc_calculate_g_ii(
+        min_pos, max_pos, c_int(num_rays), g_ii
+    )
+    
+    return g_ii.value
 
 def get_mean_optical_thickness_between_voxels(start_voxel_min:tuple, start_voxel_max:tuple, end_voxel_min:tuple, end_voxel_max:tuple, num_rays:int):
     start_min_x,start_min_y,start_min_z = start_voxel_min

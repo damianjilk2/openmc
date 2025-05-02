@@ -536,6 +536,196 @@ extern "C" double openmc_calculate_optical_thickness(
   return optical_thickness;
 }
 
+extern "C" void openmc_get_voxel_cross_sections(Position voxel_min,
+  Position voxel_max, int num_samples, double* sigma_t_output,
+  double* sigma_a_output)
+{
+  double total_sigma_t = 0.0;
+  double total_sigma_a = 0.0;
+  SpatialBox voxel_box(voxel_min, voxel_max);
+  int64_t id = 1;
+  uint64_t seed = init_seed(id, STREAM_SOURCE);
+  int valid_samples = 0;
+
+#pragma omp parallel for reduction(                                            \
+    + : total_sigma_t, total_sigma_a, valid_samples)
+  for (int i = 0; i < num_samples; ++i) {
+    Position sampled_position = voxel_box.sample(&seed);
+
+    Particle p;
+    SourceSite site;
+    site.E = 1.0;
+    site.particle = ParticleType::neutron;
+    site.r = sampled_position;
+    site.u = {1.0, 0.0, 0.0}; // Direction doesn't matter for cross section
+    p.from_source(&site);
+    p.cell_born() = p.lowest_coord().cell;
+
+    exhaustive_find_cell(p);
+    p.event_calculate_xs();
+
+    total_sigma_t += p.macro_xs().total;
+    total_sigma_a += p.macro_xs().absorption;
+    valid_samples++;
+  }
+
+  if (valid_samples > 0) {
+    *sigma_t_output = total_sigma_t / valid_samples;
+    *sigma_a_output = total_sigma_a / valid_samples;
+  } else {
+    *sigma_t_output = 0.0;
+    *sigma_a_output = 0.0;
+  }
+}
+
+extern "C" void openmc_get_transport_operator_between_voxels(
+  Position start_voxel_min, Position start_voxel_max, Position end_voxel_min,
+  Position end_voxel_max, int num_rays, double* transport_operator_output)
+{
+  double total_transport = 0.0;
+  SpatialBox start_box(start_voxel_min, start_voxel_max);
+  SpatialBox end_box(end_voxel_min, end_voxel_max);
+  int64_t id = 1;
+  uint64_t seed = init_seed(id, STREAM_SOURCE);
+  int valid_samples = 0;
+
+#pragma omp parallel for reduction(+ : total_transport, valid_samples)
+
+  for (int i = 0; i < num_rays; ++i) {
+    Position start_sampled_position = start_box.sample(&seed);
+    Position end_sampled_position = end_box.sample(&seed);
+
+    double distance = (end_sampled_position - start_sampled_position).norm();
+    double optical_thickness = openmc_calculate_optical_thickness(
+      start_sampled_position, end_sampled_position);
+
+    double transport = std::exp(-optical_thickness) / (distance * distance);
+    total_transport += transport;
+    valid_samples++;
+  }
+
+  if (valid_samples > 0) {
+    *transport_operator_output = total_transport / valid_samples;
+  } else {
+    *transport_operator_output = 0.0;
+  }
+}
+
+extern "C" void openmc_get_self_transport_operator(Position voxel_min,
+  Position voxel_max, int num_rays, double* self_transport_output)
+{
+  double total_transport = 0.0;
+  SpatialBox voxel_box(voxel_min, voxel_max);
+  int64_t id = 1;
+  uint64_t seed = init_seed(id, STREAM_SOURCE);
+  int valid_samples = 0;
+
+  // Calculate rays per sample (num_rays / 6 rounded up)
+  // This is because we sample 6 directions for each ray
+  // and we want to ensure we have at least num_rays total samples
+  // across all directions.
+  int rays_per_direction = (num_rays + 5) / 6;
+  int total_rays = rays_per_direction * 6;
+
+#pragma omp parallel for reduction(+ : total_transport, valid_samples)
+  for (int i = 0; i < rays_per_direction; ++i) {
+    // Sample two random positions within the voxel
+    // r_j will be used to find b_1 through b_6
+    // the ray will be from r_i to b_1 through b_6
+    Position r_i = voxel_box.sample(&seed);
+    Position r_j = voxel_box.sample(&seed);
+
+    const Position directions[6] = {
+      {1.0, 0.0, 0.0},  // +x direction
+      {-1.0, 0.0, 0.0}, // -x direction
+      {0.0, 1.0, 0.0},  // +y direction
+      {0.0, -1.0, 0.0}, // -y direction
+      {0.0, 0.0, 1.0},  // +z direction
+      {0.0, 0.0, -1.0}  // -z direction
+    };
+
+    for (int dir = 0; dir < 6; dir++) {
+      Position b;
+
+      switch (dir) {
+      case 0: // +x direction
+        b = {voxel_max.x, r_j.y, r_j.z};
+        break;
+      case 1: // -x direction
+        b = {voxel_min.x, r_j.y, r_j.z};
+        break;
+      case 2: // +y direction
+        b = {r_j.x, voxel_max.y, r_j.z};
+        break;
+      case 3: // -y direction
+        b = {r_j.x, voxel_min.y, r_j.z};
+        break;
+      case 4: // +z direction
+        b = {r_j.x, r_j.y, voxel_max.z};
+        break;
+      case 5: // -z direction
+        b = {r_j.x, r_j.y, voxel_min.z};
+        break;
+      }
+
+      // Calculate optical thickness from r_i to b
+      double optical_thickness = openmc_calculate_optical_thickness(r_i, b);
+
+      // Transport operator: exp(-tau)/|b-r_i|^2
+      double transport =
+        std::exp(-optical_thickness) / ((b - r_i).norm() * (b - r_i).norm());
+      total_transport += transport;
+      valid_samples++;
+    }
+  }
+
+  if (valid_samples > 0) {
+    *self_transport_output = total_transport / valid_samples;
+  } else {
+    *self_transport_output = 0.0;
+  }
+}
+
+extern "C" void openmc_calculate_g_ij(Position start_voxel_min,
+  Position start_voxel_max, Position end_voxel_min, Position end_voxel_max,
+  int num_rays, double* g_ij_output)
+{
+  double transport_operator;
+  openmc_get_transport_operator_between_voxels(start_voxel_min, start_voxel_max,
+    end_voxel_min, end_voxel_max, num_rays, &transport_operator);
+
+  // note that v_i is not actually used in the calculation of g_ij
+  double v_i = (start_voxel_max.x - start_voxel_min.x) *
+               (start_voxel_max.y - start_voxel_min.y) *
+               (start_voxel_max.z - start_voxel_min.z);
+
+  double v_j = (end_voxel_max.x - end_voxel_min.x) *
+               (end_voxel_max.y - end_voxel_min.y) *
+               (end_voxel_max.z - end_voxel_min.z);
+
+  // g_ij = transport_operator * (1 / (4 pi V_i)) * V_i * V_j
+  // = transport operator * (1 / (4 pi)) * V_j
+  *g_ij_output = transport_operator * (1.0 / (4.0 * PI)) * v_j;
+}
+
+extern "C" void openmc_calculate_g_ii(
+  Position voxel_min, Position voxel_max, int num_rays, double* g_ii_output)
+{
+  double self_transport;
+  openmc_get_self_transport_operator(
+    voxel_min, voxel_max, num_rays, &self_transport);
+
+  double volume = (voxel_max.x - voxel_min.x) * (voxel_max.y - voxel_min.y) *
+                  (voxel_max.z - voxel_min.z);
+
+  // NOTE: assume cube for area calculation
+  double area = (voxel_max.x - voxel_min.x) * (voxel_max.y - voxel_min.y);
+
+  // g_ii = self_transport * (1 / (4 pi V_i)) * V_i * A_i
+  // = self_transport * (1 / (4 pi)) * A_i
+  *g_ii_output = self_transport * (1.0 / (4.0 * PI)) * area;
+}
+
 extern "C" void openmc_get_mean_optical_thickness_between_voxels(
   Position start_voxel_min, Position start_voxel_max, Position end_voxel_min,
   Position end_voxel_max, int num_rays, double* output)
@@ -548,6 +738,9 @@ extern "C" void openmc_get_mean_optical_thickness_between_voxels(
   uint64_t seed = init_seed(id, STREAM_SOURCE);
 
 #pragma omp parallel
+  // NOTE: this causes race conditions currently and likely is a major bug. It
+  // should likely consist of a for reduction instead...
+  // This method is not used in the codebase currently however.
   {
     for (int i = 0; i < num_rays; ++i) {
       Position start_sampled_position = start_box.sample(&seed);

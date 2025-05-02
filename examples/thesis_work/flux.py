@@ -1,8 +1,7 @@
 # flux.py
 import numpy as np
-import scipy.linalg
 
-def calculate_forward_flux(P: np.ndarray, sigma: np.ndarray, volumes: np.ndarray, Q: np.ndarray, method: str = 'iterative',
+def calculate_forward_flux(P: np.ndarray, sigma_total: np.ndarray, sigma_scatter: np.ndarray, volumes: np.ndarray, source: np.ndarray, method: str = 'iterative',
                        max_iter: int = 1000, tol: float = 1e-3) -> np.ndarray:
     """
     Solve forward flux equation using either iterative or direct method. 
@@ -11,11 +10,13 @@ def calculate_forward_flux(P: np.ndarray, sigma: np.ndarray, volumes: np.ndarray
     ----------
     P : np.ndarray
         Collision probability matrix [n x n]
-    sigma : np.ndarray
-        Cross sections vector [n]
+    sigma_total : np.ndarray
+        Total cross sections vector [n]
+    sigma_scatter : np.ndarray
+        Scattering cross sections vector [n]
     volumes : np.ndarray
         Volumes of each region [n]
-    Q : np.ndarray 
+    source : np.ndarray 
         Source vector [n]
     method : str
         'iterative' (default) or 'direct'
@@ -25,29 +26,43 @@ def calculate_forward_flux(P: np.ndarray, sigma: np.ndarray, volumes: np.ndarray
     phi : np.ndarray
         Computed flux vector [n]
     """
-    sigma_V = np.diag(sigma * volumes)
+    V = np.diag(volumes)
+    sigma_t = np.diag(sigma_total)
+    sigma_s = np.diag(sigma_scatter)
+    S = np.diag(source)
 
     if method == 'direct':
-        # direct matrix inversion phi = inv(I - P sigma V) P Q 
-        I = np.eye(len(Q))
-        matrix = I - P @ sigma_V
-        # print(f"I: {I}")
-        # print(f"sigma_V: {sigma_V}")
-        # print(f"P @ sigma_V: {P @ sigma_V}")
-        # print(f"matrix: {matrix}")
+        # direct matrix inversion phi = V^-1 (sigma_t - P sigma_s)^-1 P V S
+        matrix = sigma_t - P @ sigma_s
 
-        phi = np.linalg.inv(matrix) @ P @ Q
-        # lu, piv = scipy.linalg.lu_factor(matrix)
-        # phi = scipy.linalg.lu_solve((lu, piv), P @ Q)
+        phi = np.linalg.inv(V) @ np.linalg.inv(matrix) @ P @ V @ S
+
+        # cond_forward = np.linalg.cond(matrix)
+        # cond_P = np.linalg.cond(P)
+        # print(f"Condition number of forward matrix: {cond_forward}")
+        # print(f"Condition number of P: {cond_P}")
+        # print(f'||P||2 (norm of P): {np.linalg.norm(P, 2)}')
+        # print(f'||P - P^T||2 (asymmetry of P): {np.linalg.norm(P - P.T, 2)}')
         
     elif method == 'iterative':
+        # NOTE: iterative method has not been updated yet.
+
         # iterative series solution phi = P Q + (P sigma V P Q) + (P sigma V P sigma V P Q) + ...
         # phi = sum (I + P sigma V)^n P Q
         phi = P @ Q
+        print(f"\n=== Iterative Forward Flux Solver ===")
+        print(f"Initial phi = P @ Q:")
+        print(phi)
 
-        for _ in range(max_iter):
+        norm_initial = np.linalg.norm(phi)
+        print(f"Initial norm: {norm_initial:.6e}")
+
+        # alpha = 1.0 / (np.linalg.norm(P @ sigma_V, 2) + 1e-6)
+
+        for i in range(max_iter):
             # phi_{n+1} = P Q + P sigma V phi_n
             phi_new = P @ Q + P @ sigma_V @ phi
+            # phi_new = (1 - alpha) * phi + alpha * (P @ Q + P @ sigma_V @ phi)
 
             # check convergence
             if np.linalg.norm(phi_new - phi) / np.linalg.norm(phi_new) < tol:

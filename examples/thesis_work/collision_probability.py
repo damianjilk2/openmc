@@ -119,9 +119,9 @@ def build_1d_collision_probability_matrix(regions: List[Tuple[float, float]]) ->
     
     return P
 
-def calculate_3d_collision_probability_matrix(mesh, volumes, cross_sections, num_rays: int = 100) -> np.ndarray:
+def calculate_3d_collision_probability_matrix(mesh, num_rays: int = 100):
     """
-    Calculate collision probabilities for a 3D mesh using ray tracing.
+    Calculate collision probabilities for a 3D mesh using ray tracing with the new API.
     
     Parameters
     ----------
@@ -132,94 +132,103 @@ def calculate_3d_collision_probability_matrix(mesh, volumes, cross_sections, num
         
     Returns
     -------
-    np.ndarray
-        Collision probability matrix
-    """
-    tau = calculate_optical_thickness_for_voxels(mesh, num_rays)
-    
-    n_voxels = np.prod(mesh.dimension)
-    
-    # Initialize collision probability matrix
-    P = np.zeros((n_voxels, n_voxels))
-
-    # calculate voxel centers once
-    centers = np.array([get_voxel_center(mesh, i) for i in range(n_voxels)])
-    
-    # collision probabilities built from 1d
-    for i in range(n_voxels):
-        for j in range(n_voxels):
-            if i == j:
-                # self-collision (approximation based on mean chord length)
-                # Mean chord length for a convex body: L = 4V/S (V=volume, S=surface area)
-                # For a cube with side length a: L = 4a^3/(6a^2) = 2a/3
-                voxel_size = np.cbrt(volumes[i])
-                mean_chord = 2 * voxel_size / 3
-                
-                # Escape probability: exp(-sigma*L)
-                escape_prob = np.exp(-cross_sections[i] * mean_chord)
-                
-                # Self-collision probability is (1 - escape probability)
-                P[i, i] = 1.0 - escape_prob
-            else:
-                # collision between different voxels
-                dist = np.linalg.norm(centers[i] - centers[j])
-                
-                solid_angle_factor = 1 / (4 * np.pi * dist**2)
-                
-                P[i, j] = cross_sections[j] * solid_angle_factor * np.exp(-tau[i, j]) * volumes[j]
-    
-    # row normalize to satisfy the conservation principle
-    for i in range(n_voxels):
-        row_sum = np.sum(P[i, :])
-        if row_sum > 0:
-            P[i, :] /= row_sum
-    
-    return P
-
-def calculate_optical_thickness_for_voxels(mesh, num_rays: int) -> np.ndarray:
-    """
-    Calculate optical thickness between voxels in a mesh.
-    
-    Parameters
-    ----------
-    mesh : openmc.RegularMesh
-        Mesh dividing the geometry into voxels
-    num_rays : int
-        Number of rays to use for Monte Carlo estimation
-        
-    Returns
-    -------
-    np.ndarray
-        Optical thickness matrix
+    tuple
+        (P, sigma_total, sigma_scatter) where:
+        P : np.ndarray - Collision probability matrix
+        sigma_total : np.ndarray - Total cross section for each voxel
+        sigma_scatter : np.ndarray - Scattering cross section for each voxel
     """
     lower_left = np.array(mesh.lower_left)
     upper_right = np.array(mesh.upper_right)
     dimensions = np.array(mesh.dimension)
-    
-    voxel_size = (upper_right - lower_left) / dimensions
-    
-    num_voxels = np.prod(dimensions)
-    tau = np.zeros((num_voxels, num_voxels))
-    
-    # Helper function to compute voxel bounds given its index
+
+    n_voxels = np.prod(dimensions)
+
+    # initialize matrices
+    P = np.zeros((n_voxels, n_voxels))
+    sigma_total = np.zeros(n_voxels)
+    sigma_scatter = np.zeros(n_voxels)
+
     def voxel_bounds(index):
         i = index % dimensions[0]
         j = (index // dimensions[0]) % dimensions[1]
         k = index // (dimensions[0] * dimensions[1])
-        min_bound = lower_left + voxel_size * np.array([i, j, k])
-        max_bound = min_bound + voxel_size
-        return min_bound, max_bound
+        min_bound = lower_left + (upper_right - lower_left) * np.array([i, j, k]) / dimensions
+        max_bound = min_bound + (upper_right - lower_left) / dimensions
+        return tuple(min_bound), tuple(max_bound)
     
-    # Loop over voxel pairs
-    for start_voxel in range(num_voxels):
-        start_min, start_max = voxel_bounds(start_voxel)
-        for end_voxel in range(start_voxel, num_voxels):
-            end_min, end_max = voxel_bounds(end_voxel)
-            tau[start_voxel, end_voxel] = openmc.lib.get_mean_optical_thickness_between_voxels(
-                start_min, start_max, end_min, end_max, num_rays
-            )
-            tau[end_voxel, start_voxel] = tau[start_voxel, end_voxel]
-    return tau
+    for i in range(n_voxels):
+        i_min, i_max = voxel_bounds(i)
+        
+        sigma_t, sigma_a = openmc.lib.get_voxel_cross_sections(i_min, i_max, num_rays)
+        
+        sigma_total[i] = sigma_t
+        sigma_scatter[i] = sigma_t - sigma_a
+    
+    for i in range(n_voxels):
+        i_min, i_max = voxel_bounds(i)
+        
+        for j in range(n_voxels):
+            j_min, j_max = voxel_bounds(j)
+            
+            if i == j:
+                # Self-collision (P_ii = 1 - P_esc = 1 - g_ii)
+                g_ii = openmc.lib.get_self_transport_operator(i_min, i_max, num_rays)
+                P[i, i] = 1.0 - g_ii
+            else:
+                # Collision between different voxels (P_ij = f_ij = sigma_t * g_ij)
+                g_ij = openmc.lib.calculate_g_ij(i_min, i_max, j_min, j_max, num_rays)
+                P[i, j] = sigma_total[j] * g_ij
+    
+    return P, sigma_total, sigma_scatter
+
+
+# No longer used in codebase. Leaving in case of future need.
+
+# def calculate_optical_thickness_for_voxels(mesh, num_rays: int) -> np.ndarray:
+#     """
+#     Calculate optical thickness between voxels in a mesh.
+    
+#     Parameters
+#     ----------
+#     mesh : openmc.RegularMesh
+#         Mesh dividing the geometry into voxels
+#     num_rays : int
+#         Number of rays to use for Monte Carlo estimation
+        
+#     Returns
+#     -------
+#     np.ndarray
+#         Optical thickness matrix
+#     """
+#     lower_left = np.array(mesh.lower_left)
+#     upper_right = np.array(mesh.upper_right)
+#     dimensions = np.array(mesh.dimension)
+    
+#     voxel_size = (upper_right - lower_left) / dimensions
+    
+#     num_voxels = np.prod(dimensions)
+#     tau = np.zeros((num_voxels, num_voxels))
+    
+#     # Helper function to compute voxel bounds given its index
+#     def voxel_bounds(index):
+#         i = index % dimensions[0]
+#         j = (index // dimensions[0]) % dimensions[1]
+#         k = index // (dimensions[0] * dimensions[1])
+#         min_bound = lower_left + voxel_size * np.array([i, j, k])
+#         max_bound = min_bound + voxel_size
+#         return min_bound, max_bound
+    
+#     # Loop over voxel pairs
+#     for start_voxel in range(num_voxels):
+#         start_min, start_max = voxel_bounds(start_voxel)
+#         for end_voxel in range(start_voxel, num_voxels):
+#             end_min, end_max = voxel_bounds(end_voxel)
+#             tau[start_voxel, end_voxel] = openmc.lib.get_mean_optical_thickness_between_voxels(
+#                 start_min, start_max, end_min, end_max, num_rays
+#             )
+#             tau[end_voxel, start_voxel] = tau[start_voxel, end_voxel]
+#     return tau
 
 def get_voxel_center(mesh, voxel_index):
     """

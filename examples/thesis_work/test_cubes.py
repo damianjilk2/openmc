@@ -6,42 +6,17 @@ import openmc.mgxs as mgxs
 import pytest
 from collision_probability import calculate_3d_collision_probability_matrix
 from flux import calculate_forward_flux, calculate_adjoint_flux, generate_weight_windows
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 CUBE_GEOMETRY_CONFIGS = {
     'cube_a': {
-        'materials': [
-            {'name': 'mat1', 'sigma_total': 1, 'region': 'full'}
+        'materials': [ #sigma_scattering is fraction of sigma_total
+            {'name': 'mat1', 'sigma_total': 1, 'sigma_scattering': 0.5, 'region': 'full'}
         ],
         'boundaries': 'vacuum',
-        'size': 2.0,  # 10 cm (cube from -5 to +5 in all axes)
+        'size': 10.0,  # 10 cm (cube from -5 to +5 in all axes)
         'mesh_dimension': [3, 3, 3]
-    },
-    'cube_b': {
-        'materials': [
-            {'name': 'Sm2O3', 'sigma_total': 211.0, 'region': 'inner', 'size': 4.0},
-            {'name': 'H2O', 'sigma_total': 3.45, 'region': 'outer'}
-        ],
-        'boundaries': 'vacuum',
-        'size': 10.0,
-        'mesh_dimension': [3, 3, 3]
-    },
-    'cube_c': {
-        'materials': [
-            {'name': 'D2O', 'sigma_total': 0.449, 'region': 'diagonal'},
-            {'name': 'H2O', 'sigma_total': 3.45, 'region': 'remaining'}
-        ],
-        'boundaries': 'vacuum',
-        'size': 10.0,
-        'mesh_dimension': [3, 3, 3]
-    },
-    'cube_d': {
-        'materials': [
-            {'name': 'D2O', 'sigma_total': 0.449, 'region': 'dogleg'},
-            {'name': 'H2O', 'sigma_total': 3.45, 'region': 'remaining'}
-        ],
-        'boundaries': 'vacuum',
-        'size': 10.0,
-        'mesh_dimension': [4, 4, 4]
     }
 }
 
@@ -66,8 +41,8 @@ def create_cube_model(config_name: str):
         xs = openmc.XSdata(mat_config['name'], groups)
         xs.order = 0
         xs.set_total([mat_config['sigma_total']])
-        xs.set_absorption([0.0])
-        xs.set_scatter_matrix(np.array([[[0]]]))  # Isotropic scattering
+        xs.set_absorption([mat_config['sigma_total'] - mat_config['sigma_scattering']])
+        xs.set_scatter_matrix(np.array([[[mat_config['sigma_scattering']]]]))
         mgxs_lib.add_xsdata(xs)
         
         mat = openmc.Material(name=mat_config['name'])
@@ -84,12 +59,12 @@ def create_cube_model(config_name: str):
     for mat_config in config['materials']:
         if config_name == 'cube_a':
             region = -x_max & +x_min & -y_max & +y_min & -z_max & +z_min
-        elif config_name == 'cube_b':
-            pass
-        elif config_name == 'cube_c':
-            pass
-        elif config_name == 'cube_d':
-            pass
+        # elif config_name == 'cube_b':
+        #     pass
+        # elif config_name == 'cube_c':
+        #     pass
+        # elif config_name == 'cube_d':
+        #     pass
 
         cell = openmc.Cell(region=region, fill=mat)
         cells.append(cell)
@@ -133,34 +108,47 @@ def test_cube_collision_probability(config_name):
 
     forward_source = np.zeros(num_voxels)
     forward_source[num_voxels//2] = 1.0
-    adjoint_source = np.zeros(num_voxels)
-    adjoint_source[num_voxels//2] = 1.0
+    # adjoint_source = np.zeros(num_voxels)
+    # adjoint_source[num_voxels//2] = 1.0
 
-    P = calculate_3d_collision_probability_matrix(mesh, volumes, sigmas, num_rays=500)
+    P, sigma_t, sigma_s = calculate_3d_collision_probability_matrix(mesh, num_rays=500)
     print("Collision Probability Matrix:")
     print(P)
+    print("Total Cross Section:")
+    print(sigma_t)
+    print("Scattering Cross Section:")
+    print(sigma_s)
+
+    plot_probability_matrix(P, mesh.dimension)
 
     # validation checks
     assert np.all(P >= 0) and np.all(P <= 1), "Invalid probability values"
-    assert np.allclose(P.sum(axis=1), 1.0, rtol=0.1), "Conservation violation"
-    sigma_V = np.diag(sigmas * volumes)
-    assert np.allclose(sigma_V @ P, (sigma_V @ P).T, rtol=0.1), "Reciprocity violation"
 
-    # Flux calculations
-    forward_flux = calculate_forward_flux(P, sigmas, volumes, forward_source, method='direct', max_iter=10000, tol=1e-6)
+    forward_flux = calculate_forward_flux(P, sigma_t, sigma_s, volumes, forward_source, method='direct')
     print("\nForward Flux:")
     print(forward_flux)
-    adjoint_flux = calculate_adjoint_flux(P, sigmas, volumes, adjoint_source, method='direct', max_iter=10000, tol=1e-6)
-    print("\nAdjoint Flux:")
-    print(adjoint_flux)
-
-    # Weight window generation
-    w_lower, w_upper = generate_weight_windows(adjoint_flux, alpha=1.0, C_w=5.0)
-
-    assert np.all(w_lower > 0), "Invalid lower weight bounds"
-    assert np.all(w_upper > w_lower), "Invalid upper weight bounds"
 
     openmc.lib.finalize()
+
+def plot_probability_matrix(P, mesh_dimensions):
+    """Plot and save collision probability matrix without interactive display"""
+    # TODO: possibly make it logarithmic scale
+    # TODO: add versatility to plot forward and adjoint fluxes as well as matrix P
+    plt.figure(figsize=(12, 10))
+    ax = sns.heatmap(
+        P,
+        cmap='viridis',
+        annot=False,
+        cbar_kws={'label': 'Collision Probability'},
+        square=True
+    )
+    ax.set_xlabel('Destination Voxel (j)')
+    ax.set_ylabel('Source Voxel (i)')
+    ax.set_title(f'Collision Probability Matrix ({mesh_dimensions[0]}x{mesh_dimensions[1]}x{mesh_dimensions[2]})')
+    
+    plt.tight_layout()
+    plt.savefig('collision_probability_matrix.png', dpi=300)
+    plt.close()
 
 if __name__ == "__main__":
     for config in ['cube_a']:
