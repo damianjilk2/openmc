@@ -612,6 +612,52 @@ extern "C" void openmc_get_inter_voxel_transport_operator(
   }
 }
 
+Direction sample_unit_sphere(uint64_t* seed)
+{
+  double phi = 2.0 * PI * prn(seed);
+  double cos_theta = 2.0 * prn(seed) - 1.0;
+  double sin_theta = std::sqrt(1.0 - cos_theta * cos_theta);
+
+  Direction dir;
+  dir.x = sin_theta * std::cos(phi);
+  dir.y = sin_theta * std::sin(phi);
+  dir.z = cos_theta;
+
+  return dir;
+}
+
+double distance_to_exit(const Position& point, const Direction& direction,
+  const Position& voxel_min, const Position& voxel_max)
+{
+  // compute the distance to exit the voxel by checking the intersection with
+  // each of the six faces of the voxel and minimizing the positive value
+
+  double t_min = std::numeric_limits<double>::infinity();
+
+  if (std::abs(direction.x) > FP_PRECISION) {
+    double neg_x = (voxel_min.x - point.x) / direction.x;
+    double pos_x = (voxel_max.x - point.x) / direction.x;
+
+    t_min = std::min(t_min, (direction.x > 0) ? pos_x : neg_x);
+  }
+
+  if (std::abs(direction.y) > FP_PRECISION) {
+    double neg_y = (voxel_min.y - point.y) / direction.y;
+    double pos_y = (voxel_max.y - point.y) / direction.y;
+
+    t_min = std::min(t_min, (direction.y > 0) ? pos_y : neg_y);
+  }
+
+  if (std::abs(direction.z) > FP_PRECISION) {
+    double neg_z = (voxel_min.z - point.z) / direction.z;
+    double pos_z = (voxel_max.z - point.z) / direction.z;
+
+    t_min = std::min(t_min, (direction.z > 0) ? pos_z : neg_z);
+  }
+
+  return t_min;
+}
+
 extern "C" void openmc_get_intra_voxel_transport_operator(Position voxel_min,
   Position voxel_max, int num_rays, double* self_transport_output)
 {
@@ -621,52 +667,29 @@ extern "C" void openmc_get_intra_voxel_transport_operator(Position voxel_min,
   uint64_t seed = init_seed(id, STREAM_SOURCE);
   int valid_samples = 0;
 
-  // Calculate rays per sample (num_rays / 6 rounded up)
-  // This is because we sample 6 directions for each ray
-  // and we want to ensure we have at least num_rays total samples
-  // across all directions.
-  int rays_per_direction = std::ceil(num_rays / 6);
+  int num_points = num_rays;
+  int num_directions = 1;
 
 #pragma omp parallel for reduction(+ : total_transport, valid_samples)
-  for (int i = 0; i < rays_per_direction; ++i) {
-    // Sample two random positions within the voxel
-    // r_j will be used to find b_1 through b_6
-    // the ray will be from r_i to b_1 through b_6
+  for (int i = 0; i < num_points; ++i) {
     Position r_i = voxel_box.sample(&seed);
-    Position r_j = voxel_box.sample(&seed);
 
-    for (int dir = 0; dir < 6; dir++) {
-      Position b = r_j;
+    for (int j = 0; j < num_directions; ++j) {
+      // sample random dir on unit sphere
+      Direction dir = sample_unit_sphere(&seed);
 
-      switch (dir) {
-      case 0: // +x direction
-        b.x = voxel_max.x;
-        break;
-      case 1: // -x direction
-        b.x = voxel_min.x;
-        break;
-      case 2: // +y direction
-        b.y = voxel_max.y;
-        break;
-      case 3: // -y direction
-        b.y = voxel_min.y;
-        break;
-      case 4: // +z direction
-        b.z = voxel_max.z;
-        break;
-      case 5: // -z direction
-        b.z = voxel_min.z;
-        break;
-      }
+      // calculate distance to exit the voxel in the sampled direction
+      double dist_to_boundary =
+        distance_to_exit(r_i, dir, voxel_min, voxel_max);
 
-      // Calculate optical thickness from r_i to b
-      double optical_thickness = openmc_calculate_optical_thickness(r_i, b);
+      Position endpoint = r_i + dir * dist_to_boundary;
 
-      Position ray = b - r_i;
-      double length_squared = ray.dot(ray);
+      double optical_thickness =
+        openmc_calculate_optical_thickness(r_i, endpoint);
 
-      // Transport operator: exp(-tau)/|b-r_i|^2
-      double transport = std::exp(-optical_thickness) / length_squared;
+      // new transport operator: exp(-tau)
+      double transport = std::exp(-optical_thickness);
+
       total_transport += transport;
       valid_samples++;
     }
@@ -708,14 +731,7 @@ extern "C" void openmc_calculate_g_ii(
   openmc_get_intra_voxel_transport_operator(
     voxel_min, voxel_max, num_rays, &self_transport);
 
-  Position diagonal = voxel_max - voxel_min;
-  double volume = diagonal.x * diagonal.y * diagonal.z;
-  double area = 2.0 * (diagonal.x * diagonal.y + diagonal.x * diagonal.z +
-                        diagonal.y * diagonal.z);
-
-  // g_ii = self_transport * (1 / (4 pi V_i)) * V_i * A_i
-  // = self_transport * (1 / (4 pi)) * A_i
-  *g_ii_output = self_transport * (1.0 / (4.0 * PI)) * area;
+  *g_ii_output = self_transport;
 }
 
 extern "C" void openmc_get_mean_optical_thickness_between_voxels(
